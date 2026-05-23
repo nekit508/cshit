@@ -1,4 +1,6 @@
-﻿from another_dependency_injector.wiring import inject, Wire
+﻿from typing import Self
+
+from another_dependency_injector.wiring import inject, Wire
 from llvmlite import ir
 
 from .iname import IName, INameProvider
@@ -24,6 +26,10 @@ class Type:
             self.ptr = PtrType(self)
         return self.ptr
 
+    def de_ptr(self) -> Self:
+        if isinstance(self, PtrType):
+            return self.enclosing
+        return self
 
 class PtrType(Type):
     enclosing: Type

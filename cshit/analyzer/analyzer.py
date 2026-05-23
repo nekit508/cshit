@@ -114,4 +114,4 @@ class TypeResolver(ASTVisitor):
                 ast.type = typ.as_ptr() if ast.is_ptr else typ
             case ASTKind.ConstExpr:
                 ast: ConstExpression = ast
-                ast.type = self.analyzer.scope.resolve_python_object_type(ast.value)
+                ast.type_ref = self.analyzer.scope.resolve_python_object_type(ast.value)

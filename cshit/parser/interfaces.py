@@ -27,7 +27,7 @@ class WrongToken(ParserError):
         return self.__repr__()
 
     def __repr__(self) -> str:
-        return f"Required one of {pretty_list(self.required)}, but got {self.got}"
+        return f"Required one of {pretty_list(self.required)}, but got {self.got} with type {self.got.type}"
 
 
 class IParser:

@@ -22,6 +22,7 @@ class TokenType(enum.Enum):
     PERCENT = "%"
     CARET = "^"
     AT = "@"
+    CRATE = "#"
     TILDE = "~"
     EXCLAIM = "!"
     QUESTION = "?"
@@ -40,9 +41,6 @@ class TokenType(enum.Enum):
 
     AND = "&&"
     OR = "||"
-
-    QUOTE_DOUBLE = "\""
-    QUOTE_SINGLE = "'"
 
     ARROW_RIGHT = "->"
     VOID_POINTER = "(*)"

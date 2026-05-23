@@ -1,13 +1,12 @@
-﻿import sys
+﻿import argparse
+import sys
 
 from another_dependency_injector.providing import Container
 
 import cshit
 from cshit.analyzer.analyzer import Analyzer
 from cshit.compiler.compiler import Compiler
-from cshit.lex.interfaces import TokenType
-from cshit.parser.parser import Parser, any_type
-import argparse
+from cshit.parser.parser import Parser
 
 if __name__ == "__main__":
     sys.setrecursionlimit(50)
@@ -28,13 +27,18 @@ if __name__ == "__main__":
 
     container.wire(cshit)
 
+    import builtins
+
+    original_print = builtins.print
+    def custom_print(*args, **kwargs):
+        pass
+        #original_print(*args, **kwargs)
+    builtins.print = custom_print
+
     parser = Parser()
 
-    #print(parser.parse_Expression())
-    #sys.exit(0)
-
+    print(parser.view)
     ast = parser.parse_File()
-
     print(ast)
 
     analyzer = Analyzer()
@@ -42,3 +46,5 @@ if __name__ == "__main__":
 
     compiler = Compiler(ast)
     compiler.compile()
+
+    builtins.print = original_print

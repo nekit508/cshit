@@ -79,6 +79,20 @@ class Lexer(ILexer):
             ident += self.advance()
         return Token(TokenType.IDENT, ident, self.line, start_col)
 
+    def read_string(self, quote: str) -> Token:
+        start_col = self.col
+        c = self.advance()
+        if c != quote:
+            raise SyntaxError(f"Called with quote {quote}. but current symbol is {c}")
+        string = ''
+        while self.peek() != quote:
+            if self.peek() == "\\": # TODO
+                self.advance()
+                string += self.advance()
+            else: string += self.advance()
+        self.advance()
+        return Token(TokenType.STRING, string, self.line, start_col)
+
     def get_next_token(self) -> Token | None:
         indent = self.skip_whitespace_or_get_idents()
         if indent is not None:
@@ -95,6 +109,9 @@ class Lexer(ILexer):
                 out = Token(token_type, token_type.value, self.line, self.col)
                 self.advance_n(l)
                 return out
+
+        if ch in ["\"", "'"]:
+            return self.read_string(ch)
 
         if ch.isdigit():
             return self.read_number()

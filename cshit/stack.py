@@ -153,8 +153,10 @@ class View[T](StackableObject):
         prev = 0
         for ind, obj in self:
             if pred(obj):
+                # noinspection PyTypeChecker
                 out.append(self.sub_view(prev, ind))
                 prev = ind+1
+        # noinspection PyTypeChecker
         out.append(self.after(prev))
         return out
 

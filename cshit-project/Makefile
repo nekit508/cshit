@@ -1,5 +1,7 @@
 ﻿COMPILER = D:\projects\python\compiler\.venv\Scripts\python.exe ../main.py
-LINKER = lld
+LINKER = ld --subsystem console
+
+LIBRARIES = -L"D:/soft/mingw64/x86_64-w64-mingw32/lib" -lmsvcrt -lkernel32
 
 BUILD_DIR = ./build/
 INCLUDE_DIR = ./include/
@@ -21,7 +23,7 @@ $(OBJ_DIR)%.o: $(SRC_DIR)%.cs | $(OBJ_DIR)
 objects: $(OBJS)
 
 link: $(OBJS)
-	$(LINKER) $< -o $(BUILD_DIR)output.exe
+	$(LINKER) $< $(LIBRARIES) -o $(BUILD_DIR)output.exe
 
 clean:
 	rm -f $(OBJS)

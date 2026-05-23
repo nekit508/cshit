@@ -24,8 +24,9 @@ class ASTKind(enum.Enum):
     GetExpr = "GetExpr"
     CastExpr = "CastExpr"
 
+    ImportDir = "ImportDir"
+
     File = "File"
-    Import = "Import"
 
 
 class AST:
@@ -51,6 +52,21 @@ class FileMember(AST):
     pass
 
 
+class Directive(FileMember):
+    pass
+
+
+class ImportDirective(Directive):
+    file: str
+
+    def __init__(self, file: str):
+        self.kind = ASTKind.ImportDir
+        self.file = file
+
+    def __repr__(self) -> str:
+        return f"#import {self.file}"
+
+
 class File(AST):
     members: list[FileMember]
 
@@ -63,20 +79,12 @@ class File(AST):
         return f"File[{pretty_list(self.members)}]"
 
 
-class Import(AST):
-    name: IName
-
-    def __init__(self,name: IName):
-        self.kind = ASTKind.Import
-        self.name = name
-
-
 class Statement(AST):
     pass
 
 
 class Expression(Statement):
-    type: Type
+    type_ref: Type
 
 
 class OpExpression(Expression):
@@ -115,16 +123,16 @@ class IdentExpression(Expression):
 
 
 class CastExpression(Expression):
-    type: TypeReference
+    type_ref: TypeReference
     expr: Expression
 
     def __init__(self, typ: TypeReference, expr: Expression):
         self.kind = ASTKind.CastExpr
-        self.type = typ
+        self.type_ref = typ
         self.expr = expr
 
     def __repr__(self) -> str:
-        return f"CastExpr<{self.type}>({self.expr})"
+        return f"CastExpr<{self.type_ref}>({self.expr})"
 
 
 class GetExpression(Expression):
@@ -169,7 +177,7 @@ class CodeBlock(Statement):
 
     def __repr__(self) -> str:
         from .utils import pretty_list
-        return f"CodeBlock<{pretty_list(self.statements)}>"
+        return f"CodeBlock[{pretty_list(self.statements)}]"
 
 
 class ReturnStatement(Statement):
@@ -188,19 +196,19 @@ class PassStatement(Statement):
         self.kind = ASTKind.PassStmt
 
 
-class VarDeclaration(FileMember):
+class VarDeclaration(FileMember, Statement):
     name: IName | None
-    type: TypeReference
+    type_ref: TypeReference
 
     def __init__(self, name: IName | None, type_ref: TypeReference):
         self.kind = ASTKind.VarDecl
         self.name = name
-        self.type = type_ref
+        self.type_ref = type_ref
 
     def __repr__(self) -> str:
-        return f"{self.name if self.name is not None else "<NA>"} {self.type}"
+        return f"{self.name if self.name is not None else "<NA>"} {self.type_ref}"
 
-class VarDefinition(FileMember):
+class VarDefinition(FileMember, Statement):
     decl: VarDeclaration
     initial_value: Expression
 

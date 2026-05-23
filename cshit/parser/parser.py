@@ -6,9 +6,11 @@ from .interfaces import IParser, WrongToken, MessageError
 from ..ast import Statement, \
     Expression, ConstExpression, OpExpression, IdentExpression, FunctionDeclaration, \
     TypeReference, VarDeclaration, FunctionDefinition, CodeBlock, ReturnStatement, File, FileMember, VarDefinition, \
-    CastExpression, CallExpression, GetExpression
+    CastExpression, CallExpression, GetExpression, Directive, ImportDirective
 from ..iname import INameProvider, IName
 from ..lex.interfaces import ILexer, TokenType, IToken
+from ..lex.lexer import Lexer
+from ..lex.source import FileSource
 from ..stack import View, Stack
 from ..utils import pretty_list
 
@@ -185,20 +187,23 @@ class Parser(IParser):
         return self.name_provider.simple(self.accept(TokenType.IDENT).value_str)
 
     def parse_Statement(self) -> Statement:
-        token = self.probe()
-        if token.type is TokenType.RETURN:
+        if self.view.remain() >= 2 and self.probe(1) == TokenType.COLON:
+            return self.parse_VarDefinition_or_VarDeclaration()
+        elif self.probe().type is TokenType.RETURN:
             self.consume()
             expr = self.parse_Expression_to_end_of_line()
             return ReturnStatement(expr)
         return self.parse_Expression_to_end_of_line()
 
+    @tfunc
     def parse_Expression_to_end_of_line(self) -> Expression:
+        tprint("expr_teol", self.view)
         with self.view.after_to_first_type(TokenType.NEW_LINE, TokenType.EOF).to_end:
             return self.parse_Expression()
 
     @tfunc
     def parse_Expression(self) -> Expression:
-        tprint(f"parse_Expression", self.view)
+        tprint("expr", self.view)
         if self.view.len >= 2 and self.view[0] == TokenType.LPAREN:
             depth = 0
             paired = True
@@ -219,7 +224,7 @@ class Parser(IParser):
             for ind, token in self.view.reversed:
                 depth, _ = self.handle_depth(token, depth, True)
                 if depth == 0:
-                    if token.type in operators and (ind != 0 and self.view[ind-1] not in [*self.binary_operators, TokenType.LPAREN]) and (ind != self.view.len-1):
+                    if token.type in operators and (ind != 0 and self.view[ind - 1] not in [*self.binary_operators, TokenType.LPAREN]) and (ind != self.view.len - 1):
                         left, right = self.view.split(ind)
                         with left.ignore:
                             left_expr = self.parse_Expression()
@@ -279,7 +284,7 @@ class Parser(IParser):
 
     @tfunc
     def parse_Expressions_comma_separated(self) -> list[Expression]:
-        tprint(f"parse_Expressions_comma_separated {self.view}")
+        tprint("expr_cs", self.view)
         out: list[Expression] = []
         depth = 0
         prev = 0
@@ -302,7 +307,7 @@ class Parser(IParser):
     def parse_TypeReference(self) -> TypeReference:
         name = self.parse_Name()
         is_ptr = False
-        if self.view.remain() > 1 and self.probe().type is TokenType.STAR:
+        if self.view.remain() >= 1 and self.probe().type is TokenType.STAR:
             self.consume()
             is_ptr = True
         return TypeReference(name, is_ptr)
@@ -319,7 +324,7 @@ class Parser(IParser):
 
     def parse_VarDefinition_or_VarDeclaration(self, must_parse_name: bool = True) -> VarDefinition | VarDeclaration:
         decl = self.parse_VarDeclaration(must_parse_name)
-        if self.probe().type is TokenType.EQ:
+        if self.view.remain() > 0 and self.probe().type is TokenType.EQ:
             if decl.name is None:
                 raise MessageError(f"Unable to set initial value to unnamed variable declarations {self.probe()}")
             self.consume()
@@ -363,6 +368,12 @@ class Parser(IParser):
 
         return CodeBlock(statements)
 
+    def parse_Directive(self) -> Directive:
+        self.accept(TokenType.CRATE)
+        token = self.accept(TokenType.IDENT)
+        if token.value_str == "import":
+            return ImportDirective(self.accept(TokenType.STRING).value_str)
+
     def parse_FunctionDefinition_or_FunctionDeclaration(self) -> FunctionDefinition | FunctionDeclaration:
         decl = self.parse_FunctionDeclaration()
         if self.probe().type is TokenType.COLON:
@@ -374,15 +385,25 @@ class Parser(IParser):
         return decl
 
     def parse_File(self) -> File:
-        asts: list[FileMember] = []
+        members: list[FileMember] = []
         self.skip_white_spaces()
         while self.probe().type is not TokenType.EOF:
             token = self.probe()
             if token.type is TokenType.FN:
-                asts.append(self.parse_FunctionDefinition_or_FunctionDeclaration())
+                members.append(self.parse_FunctionDefinition_or_FunctionDeclaration())
             elif token.type is TokenType.IDENT:
-                asts.append(self.parse_VarDefinition_or_VarDeclaration())
+                members.append(self.parse_VarDefinition_or_VarDeclaration())
+            elif token.type is TokenType.CRATE:
+                self.handle_directive(members, self.parse_Directive())
             else:
                 raise MessageError(f"Unexpected start of File member {token}")
             self.skip_white_spaces()
-        return File(asts)
+        out = File(members)
+        return out
+
+    def handle_directive(self, members: list[FileMember], directive: Directive):
+        if isinstance(directive, ImportDirective):
+            directive: ImportDirective = directive
+            parser = Parser(Lexer(FileSource(directive.file)), self.name_provider)
+            file = parser.parse_File()
+            members += file.members
