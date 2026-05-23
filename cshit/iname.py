@@ -1,0 +1,6 @@
+﻿class IName:
+    def actual(self) -> str: ...
+
+
+class INameProvider:
+    def simple(self, name: str) -> IName: ...
