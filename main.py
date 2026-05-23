@@ -10,6 +10,8 @@ from cshit.parser.parser import Parser, any_type
 import argparse
 
 if __name__ == "__main__":
+    sys.setrecursionlimit(50)
+
     parser = argparse.ArgumentParser(description="CShit compiler")
     parser.add_argument("input", help="Input file, typically *.cs")
     parser.add_argument("-o", "--output", help="Output file, by default is [input].o")
@@ -28,10 +30,8 @@ if __name__ == "__main__":
 
     parser = Parser()
 
-    print(parser.parse_Expression_to_end_of_line())
-    sys.exit(0)
-
-    print(parser.view)
+    #print(parser.parse_Expression())
+    #sys.exit(0)
 
     ast = parser.parse_File()
 

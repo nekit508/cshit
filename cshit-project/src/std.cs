@@ -1,1 +1,3 @@
-5 + 5 * 8 - 7 + (5 * 7 - 8)
+stdout: char*
+
+fn fputs(char*, char*) -> int

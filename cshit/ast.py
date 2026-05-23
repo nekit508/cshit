@@ -130,22 +130,28 @@ class CastExpression(Expression):
 class GetExpression(Expression):
     left: Expression
     right: IName
+    static: bool
 
-    def __init__(self, left: Expression, right: IName):
+    def __init__(self, left: Expression, right: IName, static: bool):
         self.kind = ASTKind.GetExpr
         self.left = left
         self.right = right
+        self.static = static
 
     def __repr__(self) -> str:
-        return f"GetExpr<{self.left}.{self.right}>"
+        return f"GetExpr<{self.left}{"::" if self.static else "."}{self.right}>"
 
 
-class CallExpression(Expression):
+class Call(Expression):
+    pass
+
+
+class CallExpression(Call):
     called: Expression
     params: list[Expression]
 
     def __init__(self, called: Expression, params: list[Expression]):
-        self.kind = ASTKind.ConstExpr
+        self.kind = ASTKind.CallExpr
         self.called = called
         self.params = params
 
@@ -183,16 +189,16 @@ class PassStatement(Statement):
 
 
 class VarDeclaration(FileMember):
-    name: IName
+    name: IName | None
     type: TypeReference
 
-    def __init__(self, name: IName, type_ref: TypeReference):
+    def __init__(self, name: IName | None, type_ref: TypeReference):
         self.kind = ASTKind.VarDecl
         self.name = name
         self.type = type_ref
 
     def __repr__(self) -> str:
-        return f"{self.name}: {self.type}"
+        return f"{self.name if self.name is not None else "<NA>"} {self.type}"
 
 class VarDefinition(FileMember):
     decl: VarDeclaration
@@ -219,7 +225,8 @@ class FunctionDeclaration(FileMember):
         self.params = params.copy()
 
     def __repr__(self) -> str:
-        return f"fn {self.name} ({" ".join(str(i) for i in self.params)}) -> {self.ret}"
+        from .utils import pretty_list
+        return f"fn {self.name} ({pretty_list(self.params)}) -> {self.ret}"
 
 
 class FunctionDefinition(FileMember):

@@ -1,4 +1,5 @@
-﻿from dataclasses import dataclass
+﻿from ast import Index
+from dataclasses import dataclass
 from typing import Self, Any, Callable
 
 from cshit.utils import pretty_list
@@ -67,6 +68,32 @@ class ViewIter[T]:
         else: raise StopIteration
 
 
+@dataclass
+class ReversedViewIter[T]:
+    mas: list[T]
+    start: int
+    pos: int
+    end: int
+
+    def __next__(self) -> tuple[int, T]:
+        if self.pos >= self.start:
+            out = (self.pos - self.start, self.mas[self.pos])
+            self.pos -= 1
+            return out
+        else: raise StopIteration
+
+
+@dataclass
+class ReverseViewIterProvider[T]: # constructed like ViewIter
+    mas: list[T]
+    start: int
+    pos: int
+    end: int
+
+    def __iter__(self) -> ReversedViewIter[T]: # from end to pos
+        return ReversedViewIter(self.mas, self.pos, self.end-1, self.end)
+
+
 class View[T](StackableObject):
     data: list[T]
     pos: int     # relative
@@ -94,13 +121,19 @@ class View[T](StackableObject):
         return self.to()
 
     def to_absolute(self, relative: int) -> int:
-        return self.start + relative if relative >= 0 else self.end + relative
+        return self.start + relative if relative >= 0 else self.end + relative + 1
 
     def to_relative(self, absolute: int) -> int:
         return absolute - self.start
 
     def __getitem__(self, ind: int) -> T:
+        if ind >= self.len:
+            raise IndexError(f"View index {ind} of of range for len {self.len}")
         return self.data[self.to_absolute(ind)]
+
+    def remain(self) -> int:
+        """ Current token is included """
+        return self.len - self.pos
 
     def get(self) -> T:
         return self[self.pos]
@@ -111,6 +144,7 @@ class View[T](StackableObject):
         return out
 
     def split(self, ind: int = 0) -> tuple[Self, Self]:
+        """ exclusive """
         return self.before(ind-1), self.after(ind+1)
 
     def split_all(self, pred: Callable[[T], bool]) -> list[Self]:
@@ -121,7 +155,7 @@ class View[T](StackableObject):
             if pred(obj):
                 out.append(self.sub_view(prev, ind))
                 prev = ind+1
-        out.append(self.sub_view(prev, ind))
+        out.append(self.after(prev))
         return out
 
 
@@ -131,7 +165,7 @@ class View[T](StackableObject):
 
     def before(self, i: int | None = None) -> Self:
         """ inclusive """
-        return self.sub_view(0, self.to_absolute(self.pos if i is None else i) + 1)
+        return self.sub_view(0, (self.pos if i is None else i) + 1)
 
     def after(self, i: int | None = None) -> Self:
         """ inclusive """
@@ -144,7 +178,7 @@ class View[T](StackableObject):
         return default
 
     def __repr__(self):
-        return f"{self.start}:{self.end} | {self.len} [{pretty_list(self.data[self.start:self.end])}] at {self.pos}"
+        return f"View {self.start}:{self.end} | {self.len} [{pretty_list(self.data[self.start:self.end])}] at {self.pos}"
 
     def handle(self, obj: Self, data: tuple[Any, ...]):
         if len(data) != 0:
@@ -165,3 +199,7 @@ class View[T](StackableObject):
 
     def __iter__(self) -> ViewIter[T]:
         return ViewIter(self.data, self.start, self.to_absolute(self.pos), self.end)
+
+    @property
+    def reversed(self) -> ReverseViewIterProvider[T]:
+        return ReverseViewIterProvider(self.data, self.start, self.to_absolute(self.pos), self.end)

@@ -1,15 +1,31 @@
-﻿from typing import Self, Callable, override
+﻿from typing import Self, override
 
 from another_dependency_injector.wiring import inject, Wire
 
 from .interfaces import IParser, WrongToken, MessageError
 from ..ast import Statement, \
-    Expression, ConstExpression, OpExpression, IdentExpression, CallExpression, GetExpression, FunctionDeclaration, \
-    TypeReference, VarDeclaration, FunctionDefinition, CodeBlock, ReturnStatement, AST, File, FileMember, VarDefinition, \
-    CastExpression
+    Expression, ConstExpression, OpExpression, IdentExpression, FunctionDeclaration, \
+    TypeReference, VarDeclaration, FunctionDefinition, CodeBlock, ReturnStatement, File, FileMember, VarDefinition, \
+    CastExpression, CallExpression, GetExpression
 from ..iname import INameProvider, IName
 from ..lex.interfaces import ILexer, TokenType, IToken
 from ..stack import View, Stack
+from ..utils import pretty_list
+
+d = -1
+
+def tprint(*args, **kwargs):
+    print(f"    " * d, end="")
+    print(*args, **kwargs)
+
+def tfunc(func):
+    def wrapper(*args, **kwargs):
+        global d
+        d += 1
+        out = func(*args, **kwargs)
+        d -= 1
+        return out
+    return wrapper
 
 def any_type(*types: TokenType):
     return lambda a: a.type in types
@@ -76,8 +92,7 @@ class Parser(IParser):
 
         self.binary_operators_sorted = [ # lower -> more priority
             [TokenType.PLUS, TokenType.MINUS],
-            [TokenType.STAR, TokenType.SLASH],
-            [TokenType.DOLLAR]
+            [TokenType.STAR, TokenType.SLASH]
         ]
 
         self.binary_operators = list(token for tokens in self.binary_operators_sorted for token in tokens)
@@ -107,9 +122,6 @@ class Parser(IParser):
             return token
         raise WrongToken(token, *types)
 
-    def __getitem__(self, ind: int) -> IToken:
-        return self.tokens[ind]
-
     def read_all_tokens(self):
         while True:
             token = self.lexer.get_next_token()
@@ -126,6 +138,33 @@ class Parser(IParser):
     @property
     def view(self) -> TokensView:
         return self.views.top()
+
+    def handle_depth(self, token: IToken, depth: int, reverse: bool = False) -> tuple[int, int]:
+        """
+        RPAREN -> 1
+
+        LPAREN -> -1
+        """
+        state = 0
+        if reverse:
+            if token.type is TokenType.RPAREN:
+                depth += 1
+                state = 1
+            elif token.type is TokenType.LPAREN:
+                depth -= 1
+                state = -1
+        else:
+            if token.type is TokenType.RPAREN:
+                depth -= 1
+                state = 1
+            elif token.type is TokenType.LPAREN:
+                depth += 1
+                state = -1
+
+        if depth < 0:
+            raise MessageError(f"Found unpaired paren: {token}")
+
+        return depth, state
 
     def try_parse_indents(self) -> bool:
         d = 0
@@ -157,87 +196,102 @@ class Parser(IParser):
         with self.view.after_to_first_type(TokenType.NEW_LINE, TokenType.EOF).to_end:
             return self.parse_Expression()
 
+    @tfunc
     def parse_Expression(self) -> Expression:
-        print("parse_Expression", self.view)
-        if self.view[0].type is TokenType.LPAREN and self.view[-1].type is TokenType.RPAREN:
-            with self.view.sub_view(1, self.view.len-1).to_end as v:
-                return self.parse_Expression()
+        tprint(f"parse_Expression", self.view)
+        if self.view.len >= 2 and self.view[0] == TokenType.LPAREN:
+            depth = 0
+            paired = True
+            for ind, token in self.view:
+                depth, _ = self.handle_depth(token, depth)
 
-        mas: list[Expression | IToken] = []
+                if depth == 0 and ind != self.view.len-1:
+                    paired = False
+                    break
+            if paired:
+                with self.view.sub_view(1, self.view.len-1).ignore:
+                    out = self.parse_Expression()
+                    return out
+
+        # parse binary operators
         depth = 0
-        prev_ind = 0
-        for ind, token in self.view:
-            if depth == 0 and token.type in self.binary_operators and (ind+1 >= self.view.len or self.view[ind+1].type != TokenType.RPAREN):
-                if ind - prev_ind == 0:
-                    continue
-                with self.view.sub_view(prev_ind, ind).to_end:
-                    mas.append(self.parse_Expression())
-                mas.append(token)
-                prev_ind = ind+1
-            elif token.type is TokenType.LPAREN:
-                depth += 1
-            elif token.type is TokenType.RPAREN:
-                depth -= 1
-
-        if len(mas) == 0: # we got low level representation of previous expression
-            if self.view.len == 1:
-                if self.view[0].type in self.constable:
-                    return self.parse_ConstExpression()
-                elif self.view[0].type is TokenType.IDENT:
-                    return self.parse_IdentExpression()
-            elif self.view[0].type in self.unary_operators:
-                with self.view.sub_view(1, self.view.len).to_end:
-                    expr = self.parse_Expression()
-                return OpExpression(self.view[0].type.name, [expr])
-            else:
-                first, second = self.view.find_next_pair(TokenType.LPAREN, TokenType.RPAREN)
-                if first is not None:
-                    if self.probe(second+1).type is TokenType.DOT:
-                        called, params = self.view.split(first)
-
-                        with called.to_end:
-                            called_expr = self.parse_Expression()
-
-                        params_expr: list[Expression] = []
-                        if params.len > 0:
-                            with params.sub_view(0, params.len-1).to_end:
-                                for param_view in params.split_all(TokenType.COMMA):
-                                    with param_view.to_end:
-                                        params_expr.append(self.parse_Expression())
-                        return CallExpression(called_expr, params_expr)
-                    else:
-                        with self.view.sub_view(first+1, second).to_end as v:
-                            typ = self.parse_TypeReference()
-                        with self.view.after(second+1).to_end:
-                            expr = self.parse_Expression()
-                        return CastExpression(typ, expr)
-
-                ind = self.view.find_next(TokenType.DOT)
-                if ind is not None:
-                    left, right = self.view.split(ind)
-                    with left.to_end:
-                        left_expr = self.parse_Expression()
-                    with right.to_end:
-                        right_name = self.parse_Name()
-                    return GetExpression(left_expr, right_name)
-
-            raise MessageError(f"Unexpected start of expression {self.view[0]} in view {self.view}.")
-
-        with self.view.sub_view(prev_ind, self.view.len).to_end:
-            mas.append(self.parse_Expression())
-
-        return self.parse_BinaryOpExpression_recursively(mas)
-
-    def parse_BinaryOpExpression_recursively(self, mas: list[Expression | IToken]) -> OpExpression:
         for operators in self.binary_operators_sorted:
-            for operator in operators:
-                for i in range(len(mas)):
-                    if isinstance(mas[i], IToken) and mas[i].type is operator:
-                        left = mas[:i]
-                        right = mas[i+1:]
-                        left_expr = left[0] if len(left) == 1 else self.parse_BinaryOpExpression_recursively(left)
-                        right_expr = right[0] if len(right) == 1 else self.parse_BinaryOpExpression_recursively(right)
-                        return OpExpression(operator.name, [left_expr, right_expr])
+            for ind, token in self.view.reversed:
+                depth, _ = self.handle_depth(token, depth, True)
+                if depth == 0:
+                    if token.type in operators and (ind != 0 and self.view[ind-1] not in [*self.binary_operators, TokenType.LPAREN]) and (ind != self.view.len-1):
+                        left, right = self.view.split(ind)
+                        with left.ignore:
+                            left_expr = self.parse_Expression()
+                        with right.ignore:
+                            right_expr = self.parse_Expression()
+                        return OpExpression(token.type.name, [left_expr, right_expr])
+
+        # parse unary operator
+        if self.view[0] in self.unary_operators:
+            if self.view == 1:
+                raise MessageError(f"Found single unary operator {self.view[0]}")
+            with self.view.after(1).ignore:
+                expr = self.parse_Expression()
+            return OpExpression(self.view[0].type.name, [expr])
+
+        # parse cast expression
+        if self.view[0] == TokenType.LPAREN:
+            left, right = self.view.find_next_pair(TokenType.LPAREN, TokenType.RPAREN)
+            if self.view.len <= right or self.probe(right+1).type not in [TokenType.DOT, TokenType.DOUBLE_COLON]: # check if we found complex call expression
+                with self.view.sub_view(left + 1, right).ignore:
+                    typ = self.parse_TypeReference()
+                with self.view.after(right+1).ignore:
+                    expr = self.parse_Expression()
+                return CastExpression(typ, expr)
+
+        # get/call expression
+        depth = 0
+        for ind, token in self.view.reversed:
+            depth, _ = self.handle_depth(token, depth, True)
+            if depth == 0:
+                if token == TokenType.LPAREN:
+                    self.view.pos = ind
+                    first, second = self.view.find_next_pair(TokenType.LPAREN, TokenType.RPAREN)
+                    if first is None:
+                        raise MessageError(f"Unable to find pair for {token}")
+                    with self.view.before(first-1).ignore:
+                        expr = self.parse_Expression()
+                    with self.view.sub_view(first+1, second).ignore:
+                        params = self.parse_Expressions_comma_separated()
+                    return CallExpression(expr, params)
+                elif token.type in [TokenType.DOUBLE_COLON, TokenType.DOT]:
+                    left, right = self.view.split(ind)
+                    with left.ignore:
+                        left_expr = self.parse_Expression()
+                    with right.ignore:
+                        name = self.parse_Name()
+                    return GetExpression(left_expr, name, token == TokenType.DOUBLE_COLON)
+
+        # no binary operators - parse const/ident
+        if self.view.len == 1:
+            if self.view[0].type in self.constable: # const expr
+                return self.parse_ConstExpression()
+            elif self.probe() == TokenType.IDENT:
+                return self.parse_IdentExpression()
+
+        raise MessageError(f"Unable to parse expression \"{pretty_list(list(i.value for _, i in self.view), " ")}\"")
+
+    @tfunc
+    def parse_Expressions_comma_separated(self) -> list[Expression]:
+        tprint(f"parse_Expressions_comma_separated {self.view}")
+        out: list[Expression] = []
+        depth = 0
+        prev = 0
+        for ind, token in self.view:
+            depth, _ = self.handle_depth(token, depth)
+            if depth == 0 and self.probe(ind) == TokenType.COMMA:
+                with self.view.sub_view(prev, ind).ignore:
+                    out.append(self.parse_Expression())
+                prev = ind+1
+        with self.view.after(prev).ignore:
+            out.append(self.parse_Expression())
+        return out
 
     def parse_IdentExpression(self) -> IdentExpression:
         return IdentExpression(self.name_provider.simple(self.accept(TokenType.IDENT).value_str))
@@ -248,48 +302,52 @@ class Parser(IParser):
     def parse_TypeReference(self) -> TypeReference:
         name = self.parse_Name()
         is_ptr = False
-        if self.probe().type is TokenType.STAR:
+        if self.view.remain() > 1 and self.probe().type is TokenType.STAR:
             self.consume()
             is_ptr = True
         return TypeReference(name, is_ptr)
 
-    def parse_VarDeclaration(self) -> VarDeclaration:
-        name = self.parse_Name()
-        self.accept(TokenType.COLON)
-        type_ref = self.parse_TypeReference()
+    def parse_VarDeclaration(self, must_parse_name: bool = True) -> VarDeclaration:
+        if must_parse_name or (self.view.len - self.view.pos > 1 and self.probe(1) == TokenType.COLON):
+            name = self.parse_Name()
+            self.accept(TokenType.COLON)
+            type_ref = self.parse_TypeReference()
+            return VarDeclaration(name, type_ref)
+        else:
+            type_ref = self.parse_TypeReference()
+            return VarDeclaration(None, type_ref)
 
-        return VarDeclaration(name, type_ref)
-
-    def parse_VarDefinition_or_VarDeclaration(self) -> VarDefinition | VarDeclaration:
-        decl = self.parse_VarDeclaration()
+    def parse_VarDefinition_or_VarDeclaration(self, must_parse_name: bool = True) -> VarDefinition | VarDeclaration:
+        decl = self.parse_VarDeclaration(must_parse_name)
         if self.probe().type is TokenType.EQ:
+            if decl.name is None:
+                raise MessageError(f"Unable to set initial value to unnamed variable declarations {self.probe()}")
             self.consume()
+            print(self.view)
             with self.view.after_to_first_type(TokenType.EOF, TokenType.NEW_LINE).to_end as v:
-                print("parse_VarDefinition_or_VarDeclaration", v)
                 initial = self.parse_Expression()
             return VarDefinition(decl, initial)
         return decl
 
     def parse_FunctionDeclaration(self) -> FunctionDeclaration:
-        print(self.view)
         params: list[VarDeclaration] = []
 
         self.accept(TokenType.FN)
         name = self.parse_Name()
 
         lparen = self.probe()
-        if lparen.type is TokenType.LPAREN:
+        if lparen.type is not TokenType.LPAREN:
             raise WrongToken(self.probe(), TokenType.LPAREN)
         start_ind, end_ind = self.view.find_next_pair(TokenType.LPAREN, TokenType.RPAREN)
         if end_ind is None:
             raise MessageError(f"Expected closing parens pair at {lparen}")
 
-        with self.view.sub_view(start_ind + 1, end_ind - 1).to_end as v:
+        with self.view.sub_view(start_ind + 1, end_ind).to_end:
             if self.view.len > 0:
                 params_views = self.view.split_all(TokenType.COMMA)
                 for view in params_views:
                     with view.to_end:
-                        params.append(self.parse_VarDeclaration())
+                        params.append(self.parse_VarDefinition_or_VarDeclaration(False))
         self.accept(TokenType.RPAREN) # )
 
         self.accept(TokenType.ARROW_RIGHT)
@@ -301,7 +359,6 @@ class Parser(IParser):
         statements: list[Statement] = []
 
         while self.try_parse_indents():
-            print(statements)
             statements.append(self.parse_Statement())
 
         return CodeBlock(statements)

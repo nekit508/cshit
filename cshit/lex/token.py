@@ -16,4 +16,9 @@ class Token(IToken):
 
     def __repr__(self) -> str:
         #return f"\"{self.value}\"<{self.type.name}>({self.line}:{self.column})"
-        return f"\"{self.value}\" {self.line}:{self.column}".replace("\n", "\\n")
+        return f"\"{self.value}\" {self.line}:{self.column}".replace("\n", "\\n").replace("\0", "EOF")
+
+    def __eq__(self, other):
+        if isinstance(other, TokenType):
+            return self.type is other
+        return super().__eq__(other)
