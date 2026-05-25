@@ -5,6 +5,7 @@ from another_dependency_injector.providing import Container
 
 import cshit
 from cshit.analyzer.analyzer import Analyzer
+from cshit.builtin_types import builtin_types
 from cshit.compiler.compiler import Compiler
 from cshit.parser.parser import Parser
 
@@ -31,20 +32,30 @@ if __name__ == "__main__":
 
     original_print = builtins.print
     def custom_print(*args, **kwargs):
-        pass
-        #original_print(*args, **kwargs)
+        original_print(*args, **kwargs)
     builtins.print = custom_print
 
-    parser = Parser()
+    builtin_types.init()
 
-    print(parser.view)
-    ast = parser.parse_File()
-    print(ast)
+    input_file: str = args.input
+    if input_file.endswith(".cs"):
+        parser = Parser()
 
-    analyzer = Analyzer()
-    analyzer.analyze(ast)
+        #print(parser.parse_IfStatement())
+        #exit(0)
 
-    compiler = Compiler(ast)
-    compiler.compile()
+        print(parser.view)
+        ast = parser.parse_File()
+        print(ast)
+
+        analyzer = Analyzer()
+        analyzer.analyze(ast)
+
+        compiler = Compiler(ast)
+        compiler.compile()
+    elif input_file.endswith(".ir"):
+        compiler = Compiler(None)
+        with open(input_file, "r") as f:
+            compiler.compile_text(f.read())
 
     builtins.print = original_print

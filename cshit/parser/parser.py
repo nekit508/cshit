@@ -6,15 +6,18 @@ from .interfaces import IParser, WrongToken, MessageError
 from ..ast import Statement, \
     Expression, ConstExpression, OpExpression, IdentExpression, FunctionDeclaration, \
     TypeReference, VarDeclaration, FunctionDefinition, CodeBlock, ReturnStatement, File, FileMember, VarDefinition, \
-    CastExpression, CallExpression, GetExpression, Directive, ImportDirective
+    CastExpression, CallExpression, GetExpression, Directive, ImportDirective, IfStatement
 from ..iname import INameProvider, IName
 from ..lex.interfaces import ILexer, TokenType, IToken
 from ..lex.lexer import Lexer
 from ..lex.source import FileSource
+from ..lex.token import Token
 from ..stack import View, Stack
 from ..utils import pretty_list
 
 d = -1
+
+class Parser(IParser): ...
 
 def tprint(*args, **kwargs):
     print(f"    " * d, end="")
@@ -62,6 +65,19 @@ class TokensView(View[IToken]):
         return super().split_all(any_type(*types))
 
 
+class Depth:
+    parser: Parser
+
+    def __init__(self, parser):
+        self.parser = parser
+
+    def __enter__(self):
+        self.parser.depth += 1
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        self.parser.depth -= 1
+
+
 class Parser(IParser):
     lexer: ILexer
     tokens: list[IToken]
@@ -93,6 +109,8 @@ class Parser(IParser):
         ]
 
         self.binary_operators_sorted = [ # lower -> more priority
+            [TokenType.EQEQ, TokenType.NEQ],
+            [TokenType.GE, TokenType.GT, TokenType.LE, TokenType.LT],
             [TokenType.PLUS, TokenType.MINUS],
             [TokenType.STAR, TokenType.SLASH]
         ]
@@ -108,11 +126,18 @@ class Parser(IParser):
             self.consume()
 
     @property
+    def inc_depth(self):
+        return Depth(self)
+
+    @property
     def pos(self):
         return self.view.pos
 
     def probe(self, offset: int = 0) -> IToken:
         return self.view[self.view.pos + offset]
+
+    def probe_type(self, *types: TokenType, offset: int = 0) -> bool:
+        return self.view.remain() > offset and self.probe(offset).type in types
 
     def consume(self):
         self.view.consume()
@@ -168,32 +193,59 @@ class Parser(IParser):
 
         return depth, state
 
-    def try_parse_indents(self) -> bool:
-        d = 0
-        while True:
-            token = self.probe(d)
-            if token.type is TokenType.INDENT:
-                d += 1
-                if d == self.depth:
-                    self.view.pos += d
-                    return True
-            elif token.type is TokenType.NEW_LINE:
-                self.view.pos += d + 1
-                d = 0
-            else:
-                return False
+    def next_level_is_same(self) -> bool:
+        with self.view.after().ignore as view:
+            depth = 0
+            lines = 0
+            while True:
+                token = self.probe()
+                if token == TokenType.NEW_LINE:
+                    depth = 0
+                    lines += 1
+                elif token == TokenType.INDENT:
+                    depth += 1
+                elif token == TokenType.EOF:
+                    out = False
+                    break
+                else:
+                    out = depth == self.depth or lines == 0
+                    break
+                self.consume()
+        if out: view.align_pos(self.view)
+        return out
 
     def parse_Name(self) -> IName:
         return self.name_provider.simple(self.accept(TokenType.IDENT).value_str)
 
     def parse_Statement(self) -> Statement:
-        if self.view.remain() >= 2 and self.probe(1) == TokenType.COLON:
+        if self.probe_type(TokenType.IDENT) and self.probe_type(TokenType.COLON, offset=1):
             return self.parse_VarDefinition_or_VarDeclaration()
+        elif self.probe_type(TokenType.IF):
+            return self.parse_IfStatement()
         elif self.probe().type is TokenType.RETURN:
             self.consume()
             expr = self.parse_Expression_to_end_of_line()
             return ReturnStatement(expr)
         return self.parse_Expression_to_end_of_line()
+
+    def parse_IfStatement(self) -> IfStatement:
+        conditions: list[Expression] = []
+        branches: list[CodeBlock] = []
+
+        self.accept(TokenType.IF)
+        while len(conditions) == 0 or (self.next_level_is_same() and self.probe_type(TokenType.ELIF)):
+            if len(conditions) != 0: self.consume()
+            with self.view.after_to_first_type(TokenType.COLON).to_end as v:
+                conditions.append(self.parse_Expression())
+            self.accept(TokenType.COLON)
+            branches.append(self.parse_CodeBlock())
+
+        negative = None
+        if self.next_level_is_same() and self.probe_type(TokenType.ELSE):
+            self.consume()
+            self.accept(TokenType.COLON)
+            negative = self.parse_CodeBlock()
+        return IfStatement(conditions, branches, negative)
 
     @tfunc
     def parse_Expression_to_end_of_line(self) -> Expression:
@@ -230,7 +282,7 @@ class Parser(IParser):
                             left_expr = self.parse_Expression()
                         with right.ignore:
                             right_expr = self.parse_Expression()
-                        return OpExpression(token.type.name, [left_expr, right_expr])
+                        return OpExpression(token.type, [left_expr, right_expr])
 
         # parse unary operator
         if self.view[0] in self.unary_operators:
@@ -238,7 +290,7 @@ class Parser(IParser):
                 raise MessageError(f"Found single unary operator {self.view[0]}")
             with self.view.after(1).ignore:
                 expr = self.parse_Expression()
-            return OpExpression(self.view[0].type.name, [expr])
+            return OpExpression(self.view[0].type, [expr])
 
         # parse cast expression
         if self.view[0] == TokenType.LPAREN:
@@ -258,12 +310,14 @@ class Parser(IParser):
                 if token == TokenType.LPAREN:
                     self.view.pos = ind
                     first, second = self.view.find_next_pair(TokenType.LPAREN, TokenType.RPAREN)
+                    params: list[Expression] = []
                     if first is None:
                         raise MessageError(f"Unable to find pair for {token}")
                     with self.view.before(first-1).ignore:
                         expr = self.parse_Expression()
-                    with self.view.sub_view(first+1, second).ignore:
-                        params = self.parse_Expressions_comma_separated()
+                    with self.view.sub_view(first+1, second).ignore as v:
+                        if v.len > 0:
+                            params += self.parse_Expressions_comma_separated()
                     return CallExpression(expr, params)
                 elif token.type in [TokenType.DOUBLE_COLON, TokenType.DOT]:
                     left, right = self.view.split(ind)
@@ -328,7 +382,6 @@ class Parser(IParser):
             if decl.name is None:
                 raise MessageError(f"Unable to set initial value to unnamed variable declarations {self.probe()}")
             self.consume()
-            print(self.view)
             with self.view.after_to_first_type(TokenType.EOF, TokenType.NEW_LINE).to_end as v:
                 initial = self.parse_Expression()
             return VarDefinition(decl, initial)
@@ -360,13 +413,26 @@ class Parser(IParser):
 
         return FunctionDeclaration(name, type_ref, params)
 
-    def parse_CodeBlock(self) -> CodeBlock:
+    def _parse_CodeBlock(self) -> CodeBlock:
+        start = self.view.pos
         statements: list[Statement] = []
 
-        while self.try_parse_indents():
+        while self.next_level_is_same():
             statements.append(self.parse_Statement())
 
+        #if self.probe_type(TokenType.NEW_LINE):
+        #    self.consume()
+
+        if len(statements) == 0:
+            raise MessageError(f"Got empty code block at {self.view[start]}")
         return CodeBlock(statements)
+
+    def parse_CodeBlock(self, inc: bool = True) -> CodeBlock:
+        print("pcb", self.probe())
+        if inc:
+            with self.inc_depth:
+                return self._parse_CodeBlock()
+        return self._parse_CodeBlock()
 
     def parse_Directive(self) -> Directive:
         self.accept(TokenType.CRATE)
@@ -378,9 +444,7 @@ class Parser(IParser):
         decl = self.parse_FunctionDeclaration()
         if self.probe().type is TokenType.COLON:
             self.consume()
-            self.depth += 1
             block = self.parse_CodeBlock()
-            self.depth -= 1
             return FunctionDefinition(decl, block)
         return decl
 

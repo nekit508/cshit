@@ -1,7 +1,20 @@
 ﻿import enum
+from collections.abc import Callable
 
+from .builtin_types import builtin_types
 from .iname import IName
-from .types import Type
+from .lex.interfaces import TokenType
+from .types import Type, FunctionType
+
+
+class Operator:
+    strategy: Callable[[Type, ...], Type]
+
+    def __init__(self, strategy: Callable[[Type, ...], Type]):
+        self.strategy = strategy
+
+    def result_type(self, *operands: Type) -> Type:
+        return self.strategy(*operands)
 
 
 class ASTKind(enum.Enum):
@@ -16,6 +29,7 @@ class ASTKind(enum.Enum):
 
     ReturnStmt = "ReturnStmt"
     PassStmt = "PassStmt"
+    IfStmt = "IfStmt"
 
     OpExpr = "OpExpr"
     ConstExpr = "ConstExpr"
@@ -84,14 +98,16 @@ class Statement(AST):
 
 
 class Expression(Statement):
-    type_ref: Type
+    type: Type
 
 
 class OpExpression(Expression):
-    operator: str
+    operator: TokenType
     operands: list[Expression]
 
-    def __init__(self, operator: str, operands: list[Expression]):
+    operands_type: Type
+
+    def __init__(self, operator: TokenType, operands: list[Expression]):
         self.kind = ASTKind.OpExpr
         self.operator = operator
         self.operands = operands
@@ -150,11 +166,7 @@ class GetExpression(Expression):
         return f"GetExpr<{self.left}{"::" if self.static else "."}{self.right}>"
 
 
-class Call(Expression):
-    pass
-
-
-class CallExpression(Call):
+class CallExpression(Expression):
     called: Expression
     params: list[Expression]
 
@@ -182,6 +194,7 @@ class CodeBlock(Statement):
 
 class ReturnStatement(Statement):
     expr: Expression
+    type: Type
 
     def __init__(self, expr: Expression):
         self.kind = ASTKind.ReturnStmt
@@ -196,9 +209,27 @@ class PassStatement(Statement):
         self.kind = ASTKind.PassStmt
 
 
+class IfStatement(Statement):
+    conditions: list[Expression]
+    branches: list[CodeBlock]
+    else_block: CodeBlock
+
+    def __init__(self, conditions: list[Expression], branches: list[CodeBlock], negative: CodeBlock):
+        self.kind = ASTKind.IfStmt
+        self.conditions = conditions
+        self.branches = branches
+        self.else_block = negative
+
+    def __repr__(self) -> str:
+        from cshit.utils import pretty_list
+        return f"IfStmt<{pretty_list(list(f"{self.conditions[i]} -> {self.branches[i]}" for i in range(len(self.branches))), sep="; ")}{f" else: {self.else_block}" if self.else_block is not None else ""}>"
+
+
 class VarDeclaration(FileMember, Statement):
     name: IName | None
     type_ref: TypeReference
+
+    type: Type
 
     def __init__(self, name: IName | None, type_ref: TypeReference):
         self.kind = ASTKind.VarDecl
@@ -225,6 +256,8 @@ class FunctionDeclaration(FileMember):
     name: IName
     ret: TypeReference
     params: list[VarDeclaration]
+
+    type: FunctionType
 
     def __init__(self, name: IName, ret: TypeReference, params: list[VarDeclaration]):
         self.kind = ASTKind.FuncDecl

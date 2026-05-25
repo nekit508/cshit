@@ -32,7 +32,7 @@ class TokenType(enum.Enum):
 
     EQ = "="
     EQEQ = "=="
-    NE = "!="
+    NEQ = "!="
     LT = "<"
     GT = ">"
     LE = "<="
@@ -46,6 +46,11 @@ class TokenType(enum.Enum):
     VOID_POINTER = "(*)"
 
     FN = "fn"
+    IF = "if"
+    ELIF = "elif"
+    ELSE = "else"
+    WHILE = "while"
+    FOR = "for"
     RETURN = "return"
     PASS = "pass"
 
@@ -65,6 +70,7 @@ class TokenType(enum.Enum):
     def scan_values(cls) -> list[Self]:
         return list(filter(lambda a: a not in cls.actual_type_notations.value, sorted([getattr(cls, member_name) for member_name in cls._member_names_ if member_name not in ("actual_type_notations")], key=lambda a: -len(a.value)), ))
 
+
 class IToken:
     type: TokenType
     value: object
@@ -72,6 +78,7 @@ class IToken:
     column: int
 
     value_str: str
+
 
 class ISource:
     def get_str(self) -> str: ...
