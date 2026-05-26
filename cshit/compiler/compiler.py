@@ -2,7 +2,7 @@
 
 from another_dependency_injector.wiring import inject, Wire
 from llvmlite import ir, binding
-from llvmlite.binding import ModuleRef
+from llvmlite.binding import ModuleRef, PipelineTuningOptions
 from llvmlite.ir import Function, CallInstr, Value, NamedValue
 
 from .interfaces import ICompiler, CompileError
@@ -26,6 +26,9 @@ class UnresolvedSymbol(Exception):
 
     def __repr__(self) -> str:
         return f"Unknown symbol {self.name} of type {self.type}"
+
+    def __str__(self) -> str:
+        return f"{self.__repr__()}"
 
 
 class NameProvider:
@@ -173,9 +176,9 @@ class Compiler(ICompiler):
         target = binding.Target.from_default_triple()
         target_machine = target.create_target_machine(codemodel="default")
 
-        # pass_manager_builder = binding.create_pass_builder(target_machine, PipelineTuningOptions())
-        # pass_manager = pass_manager_builder.getModulePassManager()
-        # pass_manager.run(mod, pass_manager_builder)
+        #pass_manager_builder = binding.create_pass_builder(target_machine, PipelineTuningOptions())
+        #pass_manager = pass_manager_builder.getModulePassManager()
+        #pass_manager.run(mod, pass_manager_builder)
 
         print("=================================   Resulting IR Code   =================================")
         print(mod)
@@ -297,7 +300,7 @@ class Compiler(ICompiler):
         self.ir_builder.position_at_start(merge)
 
     def compile_VarDecl(self, var_decl: VarDeclaration) -> ir.instructions.AllocaInstr:
-        print("compile_GlobalVarDecl", var_decl.type_ref.type.as_native())
+        print("compile_VarDecl", var_decl.type_ref.type.as_native(), "name:" , var_decl.name)
         out = self.ir_builder.alloca(var_decl.type_ref.type.as_native(), name=var_decl.name.actual())
         self.context.register_variable(out)
         return out
@@ -308,7 +311,7 @@ class Compiler(ICompiler):
         return value
 
     def compile_GlobalVarDecl(self, var_decl: VarDeclaration) -> ir.GlobalVariable:
-        print("compile_GlobalVarDecl", var_decl.type_ref.type.as_native())
+        print("compile_GlobalVarDecl", var_decl.type_ref.type.as_native(), "name:" , var_decl.name)
         out = ir.GlobalVariable(self.module, var_decl.type_ref.type.as_native(), var_decl.name.actual())
         self.context.register_variable(out)
         return out
@@ -329,7 +332,7 @@ class Compiler(ICompiler):
         elif expr.kind is ASTKind.CallExpr:
             return self.compile_CallExpr(expr)
         elif expr.kind is ASTKind.IdentExpr:
-            return self.compile_IdentExpr(expr)
+            return self.compile_IdentExpr_get(expr)
         elif expr.kind is ASTKind.OpExpr:
             return self.compile_OpExpr(expr)
 
@@ -337,6 +340,12 @@ class Compiler(ICompiler):
 
     def compile_OpExpr(self, op: OpExpression) -> ir.Value:
         if len(op.operands) == 2:
+            if op.operator is TokenType.EQ:
+                if op.operands[0].kind is not ASTKind.IdentExpr:
+                    raise CompileError("Can set only ident expressions")
+                left, right = self.compile_IdentExpr_ref(op.operands[0]), self.compile_Expression(op.operands[1])
+                return self.ir_builder.store(right, left)
+
             left, right = list(self.compile_Expression(operand) for operand in op.operands)
 
             if op.operator not in self.operators_map:
@@ -353,11 +362,20 @@ class Compiler(ICompiler):
                         return self.ir_builder.fcmp_ordered(operator_map, left, right)
                     else: CompileError(f"Unknown operands type {op.operands_type}")
             elif op.operator in builtin_types.arithmetic_binary_operators:
-                pass
+                raise NotImplementedError(builtin_types.arithmetic_binary_operators)
             else: raise CompileError(f"Unknown operator type {op.operator}")
-        else: raise CompileError(f"Unable to compile non binary op {op} yet")
+        elif len(op.operands) == 1:
+            if op.operator is TokenType.AMPERSAND:
+                if op.operands[0].kind is not ASTKind.IdentExpr:
+                    raise CompileError("Can get address only of ident expressions")
+                return self.compile_IdentExpr_ref(op.operands[0]) # hope analyzer stripped all type errors
+            else: raise CompileError(f"Unknown operator type {op.operator}")
+        else: raise CompileError(f"Unable to compile non binary/unary op {op} yet")
 
-    def compile_IdentExpr(self, expr: IdentExpression) -> NamedValue:
+    def compile_IdentExpr_ref(self, expr: IdentExpression) -> ir.Value:
+        return self.require_var(expr.name.actual())
+
+    def compile_IdentExpr_get(self, expr: IdentExpression) -> NamedValue:
         return self.ir_builder.access_value(self.require_var(expr.name.actual()))
 
     def compile_CallExpr(self, expr: CallExpression) -> CallInstr:
@@ -371,7 +389,7 @@ class Compiler(ICompiler):
                 params.append(self.compile_Expression(param))
 
             return self.ir_builder.call(func, params)
-        else: NotImplementedError("non static CallExpression not implemented yet")
+        else: raise NotImplementedError("non static CallExpression not implemented yet")
 
     def compile_CastExpr(self, cast: CastExpression) -> ir.Value:
         # hope analyzer stripped wrong casts

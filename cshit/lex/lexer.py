@@ -86,11 +86,11 @@ class Lexer(ILexer):
             raise SyntaxError(f"Called with quote {quote}. but current symbol is {c}")
         string = ''
         while self.peek() != quote:
-            if self.peek() == "\\": # TODO
-                self.advance()
-                string += self.advance()
-            else: string += self.advance()
+            string += self.advance()
         self.advance()
+        print(string)
+        string = str(string).replace("\\n", "\n")
+        print(string)
         return Token(TokenType.STRING, string, self.line, start_col)
 
     def get_next_token(self) -> Token | None:
@@ -111,6 +111,7 @@ class Lexer(ILexer):
                 return out
 
         if ch in ["\"", "'"]:
+            print("jghfdkjgd")
             return self.read_string(ch)
 
         if ch.isdigit():

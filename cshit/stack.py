@@ -67,6 +67,9 @@ class ViewIter[T]:
             return out
         else: raise StopIteration
 
+    def __iter__(self) -> Self:
+        return self
+
 
 @dataclass
 class ReversedViewIter[T]:

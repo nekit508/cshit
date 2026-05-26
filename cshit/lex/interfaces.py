@@ -38,6 +38,7 @@ class TokenType(enum.Enum):
     LE = "<="
     GE = ">="
     DOUBLE_COLON = "::"
+    ELLIPSIS = "..."
 
     AND = "&&"
     OR = "||"

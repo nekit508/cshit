@@ -105,10 +105,15 @@ class Parser(IParser):
         self.constable = [TokenType.NUMBER, TokenType.STRING]
 
         self.unary_operators = [
-            TokenType.PLUS, TokenType.MINUS, TokenType.STAR, TokenType.AMPERSAND, TokenType.EXCLAIM
+            TokenType.PLUS,
+            TokenType.MINUS,
+            TokenType.STAR,
+            TokenType.AMPERSAND,
+            TokenType.EXCLAIM
         ]
 
         self.binary_operators_sorted = [ # lower -> more priority
+            [TokenType.EQ],
             [TokenType.EQEQ, TokenType.NEQ],
             [TokenType.GE, TokenType.GT, TokenType.LE, TokenType.LT],
             [TokenType.PLUS, TokenType.MINUS],
@@ -400,18 +405,23 @@ class Parser(IParser):
         if end_ind is None:
             raise MessageError(f"Expected closing parens pair at {lparen}")
 
+        var_arg = False
+
         with self.view.sub_view(start_ind + 1, end_ind).to_end:
             if self.view.len > 0:
                 params_views = self.view.split_all(TokenType.COMMA)
-                for view in params_views:
+                for i, view in enumerate(params_views):
                     with view.to_end:
+                        if i == len(params_views)-1 and self.probe_type(TokenType.ELLIPSIS):
+                            var_arg = True
+                            continue
                         params.append(self.parse_VarDefinition_or_VarDeclaration(False))
         self.accept(TokenType.RPAREN) # )
 
         self.accept(TokenType.ARROW_RIGHT)
         type_ref = self.parse_TypeReference()
 
-        return FunctionDeclaration(name, type_ref, params)
+        return FunctionDeclaration(name, type_ref, params, var_arg)
 
     def _parse_CodeBlock(self) -> CodeBlock:
         start = self.view.pos

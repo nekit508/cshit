@@ -78,17 +78,19 @@ class NamedType(Type):
 class FunctionType(NamedType):
     ret: Type
     params: list[Type]
+    var_arg: bool
 
-    def __init__(self, full_name: IName, ret: Type, params: list[Type]):
+    def __init__(self, full_name: IName, ret: Type, params: list[Type], var_arg: bool):
         super().__init__(full_name)
         self.ret = ret
         self.params = params
+        self.var_arg = var_arg
 
     def __repr__(self) -> str:
-        return f"({pretty_list(self.params)}) -> {self.ret}"
+        return f"{self.name().actual()}({pretty_list(self.params)}) -> {self.ret}"
 
     def as_native(self) -> ir.types.Type:
-        return ir.FunctionType(self.ret.as_native(), list(param.as_native() for param in self.params))
+        return ir.FunctionType(self.ret.as_native(), list(param.as_native() for param in self.params), var_arg=self.var_arg)
 
 
 class RecursiveType(Type):

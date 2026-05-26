@@ -28,6 +28,7 @@ class BuiltinTypes:
     floats: list[Type]
     signed_integers: list[Type]
     unsigned_integers: list[Type]
+    integers: list[Type]
 
     logic_binary_operators: list[TokenType]
     arithmetic_binary_operators: list[TokenType]
@@ -76,6 +77,8 @@ class BuiltinTypes:
         self.unsigned_integers = [
 
         ]
+
+        self.integers = self.signed_integers + self.unsigned_integers
 
         self.logic_binary_operators = [
             TokenType.EQEQ,

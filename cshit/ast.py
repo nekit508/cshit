@@ -256,18 +256,20 @@ class FunctionDeclaration(FileMember):
     name: IName
     ret: TypeReference
     params: list[VarDeclaration]
+    var_arg: bool
 
     type: FunctionType
 
-    def __init__(self, name: IName, ret: TypeReference, params: list[VarDeclaration]):
+    def __init__(self, name: IName, ret: TypeReference, params: list[VarDeclaration], var_arg: bool):
         self.kind = ASTKind.FuncDecl
         self.name = name
         self.ret = ret
         self.params = params.copy()
+        self.var_arg = var_arg
 
     def __repr__(self) -> str:
         from .utils import pretty_list
-        return f"fn {self.name} ({pretty_list(self.params)}) -> {self.ret}"
+        return f"fn {self.name} ({pretty_list(self.params)}{f", ..." if self.var_arg else ""}) -> {self.ret}"
 
 
 class FunctionDefinition(FileMember):

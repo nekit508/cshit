@@ -5,6 +5,7 @@ from llvmlite.ir import FloatType, IntType, VoidType
 from .interfaces import IAnalyzer, UnresolvedType, TypesMismatch
 from ..ast import *
 from ..builtin_types import *
+from ..compiler.interfaces import CompileError
 from ..lex.token import Token
 from ..recursive_dict import RecursiveDict
 from ..stack import StackableObject, Stack
@@ -75,7 +76,7 @@ class Analyzer(IAnalyzer):
                 raise AnalyzerError(f"Second declaration of type with name {name}")
 
     @property
-    def scope(self):
+    def scope(self) -> Scope:
         return self.scopes.top()
 
     def analyze(self, ast: AST):
@@ -110,6 +111,8 @@ class Analyzer(IAnalyzer):
 
     def is_convertible(self, a: Type, b: Type) -> bool:
         """ a -> b """
+        if b.is_ptr and a in builtin_types.integers:
+            return True
         return a == b
 
     def resolve_target_arithmetic_conversion(self, a: Type, b: Type) -> Type:
@@ -169,7 +172,8 @@ class Analyzer(IAnalyzer):
         decl.type = FunctionType(
             decl.name,
             decl.ret.type,
-            list(param.type for param in decl.params)
+            list(param.type for param in decl.params),
+            decl.var_arg
         )
 
         if add: self.register_func_unique(decl.name.actual(), decl.type)
@@ -214,7 +218,14 @@ class Analyzer(IAnalyzer):
             operator = op.operator
             left, right = op.operands
 
-            if operator in builtin_types.arithmetic_binary_operators:
+            if operator is TokenType.EQ:
+                if op.operands[0].kind is not ASTKind.IdentExpr: raise AnalyzerError(f"Left operand of = op must be ident but {op.operands[0].kind}")
+                if left.type.is_func: # TODO reject be final/variable
+                    raise AnalyzerError("Cannot set function")
+
+                op.type = left.type
+                op.operands[1] = self.inject_cast_if_needed(right, left.type)
+            elif operator in builtin_types.arithmetic_binary_operators:
                 op.type = op.operands_type = self.resolve_target_arithmetic_conversion(left.type, right.type)
                 op.operands = list(self.inject_cast_if_needed(operand, op.type) for operand in op.operands)
             elif operator in builtin_types.logic_binary_operators:
@@ -222,7 +233,15 @@ class Analyzer(IAnalyzer):
                 op.operands = list(self.inject_cast_if_needed(operand, op.operands_type) for operand in op.operands)
                 op.type = builtin_types.bool_type
             else: raise AnalyzerError(f"Unknown binary operator type {operator}")
-        else: raise NotImplementedError("Non binary operators")
+        elif len(op.operands) == 1:
+            if op.operator is TokenType.AMPERSAND:
+                operand = op.operands[0]
+                if operand.kind is not ASTKind.IdentExpr:
+                    raise AnalyzerError("Can take address only of named variable")
+                self.analyze_IdentExpr(operand, (True, True, False))
+                op.type = op.operands_type = operand.type.as_ptr()
+            else: raise AnalyzerError(f"Unknown unary operator type {op.operator}")
+        else:raise NotImplementedError("Non binary/unary operators")
 
     def analyze_ConstExpr(self, const: ConstExpression):
         typ = type(const.value)
@@ -237,11 +256,17 @@ class Analyzer(IAnalyzer):
             const.type = builtin_types.char_type.as_ptr()
         else: AnalyzerError(f"Value {const} has wrong type {typ}")
 
-    def analyze_IdentExpr(self, ident: IdentExpression): # 1) var 2) func 3) type
+    def analyze_IdentExpr(self, ident: IdentExpression, required: tuple[bool, bool, bool] = (True, True, True)): # 1) var 2) func 3) type
+        var, func, typ = required
         name = ident.name.actual()
-        out = (self.scope.variables.resolve(name) or
-               self.scope.functions.resolve(name) or
-               self.scope.types.resolve(name))
+
+        out = None
+        if var:
+            out = self.scope.variables.resolve(name)
+        if func and out is None:
+            out = self.scope.functions.resolve(name)
+        if typ and out is None:
+            out = self.scope.types.resolve(name)
         if out is None: raise UndefinedSymbol(name, "Symbol")
         ident.type = out
 
@@ -252,11 +277,14 @@ class Analyzer(IAnalyzer):
         if not isinstance(typ, FunctionType): raise AnalyzerError(f"Called non callable value {call.called}")
         call.type = typ.ret
 
+        if len(typ.params) != len(call.params) and (not typ.var_arg or len(typ.params) > len(call.params)):
+            raise CompileError(f"Wrong len of params of function {typ} expected {len(typ.params)}{"+" if typ.var_arg else ""} got {len(call.params)}")
+
         for i in range(len(call.params)):
             param = call.params[i]
             self.analyze_Expression(param)
 
-            if not self.is_convertible(param.type, typ.params[i]):
+            if i < len(typ.params) and not self.is_convertible(param.type, typ.params[i]):
                 raise UncovertibleTypes(param.type, typ.params[i])
 
     def analyze_CodeBlock(self, block: CodeBlock):
@@ -303,85 +331,3 @@ class Analyzer(IAnalyzer):
             raise AnalyzerError("Return out of function body")
         if not self.is_convertible(ret.type, self.func.ret):
             raise UncovertibleTypes(ret.type, self.func.ret)
-
-
-class TypeResolver(ASTVisitor):
-    analyzer: Analyzer
-
-    def __init__(self, analyzer: Analyzer):
-        super().__init__()
-        self.analyzer = analyzer
-
-    @property
-    def scope(self):
-        return self.analyzer.scope
-
-    def enter[T:AST](self, ast: T):
-        pass
-
-    def exit[T:AST](self, ast: T):
-        match ast.kind:
-            case ASTKind.FuncDecl:
-                prev = self.analyzer.scopes.pop()
-                prev.handle(self.analyzer.scopes.top(), ())
-
-    def visit[T:AST](self, ast: T):
-        match ast.kind:
-            case ASTKind.TypeRef:
-                ast: TypeReference = ast
-                name = ast.name.actual()
-                ast.type = self.scope.types.resolve(name)
-                if ast.is_ptr: ast.type = ast.type.as_ptr()
-                if ast.type is None:
-                    raise RuntimeError(f"Type {name} was not declared in current scope")
-            case ASTKind.ConstExpr:
-                ast: ConstExpression = ast
-                typ = type(ast.value)
-                if typ == int:
-                    ast.type = builtin_types.int_type
-                elif typ == str:
-                    ast.type = builtin_types.char_type.as_ptr()
-                elif typ == bool:
-                    ast.type = builtin_types.bool_type
-                elif typ == float:
-                    ast.type = builtin_types.float_type
-                else: raise RuntimeError(f"Constant {ast.value} has unknown type {typ}")
-            case ASTKind.VarDecl:
-                ast: VarDeclaration = ast
-
-                ast.type = ast.type_ref.type
-
-                if self.stack[-2].kind == ASTKind.FuncDecl: return # do not add parameters in outer scope
-                if ast.name is None: return # skip registration of unnamed variables
-                var_name = ast.name.actual() # register type as variable
-                if not self.analyzer.scope.variables.register(var_name, ast.type):
-                    raise RuntimeError(f"Variable with name {var_name} already declared in current scope")
-            case ASTKind.FuncDecl:
-                ast: FunctionDeclaration = ast
-
-                ast.type = FunctionType(
-                    ast.name,
-                    ast.ret.type,
-                    list(param.type for param in ast.params)
-                )
-
-                func_name = ast.name.actual() # register type as function and variable
-                if not self.scope.functions.register(func_name, ast.type):
-                    raise RuntimeError(f"Function with name {func_name} already declared in current scope")
-                if not  self.scope.variables.register(func_name, ast.type):
-                    raise RuntimeError(f"Variable with name {func_name} already declared in current scope")
-
-                self.analyzer.scopes.push(self.scope.child)
-
-                for var in ast.params:
-                    if var.name is None: return  # skip registration of unnamed variables
-                    var_name = var.name.actual()  # register type as variable
-                    if not self.analyzer.scope.variables.register(var_name, var.type):
-                        raise RuntimeError(f"Variable with name {var_name} already declared in current scope")
-            case ASTKind.CallExpr:
-                ast: CallExpression = ast
-
-                ast.type = ast.called.type
-                if isinstance(ast.called.type, FunctionType):
-                    ast.called.type = ast.called.type.ret
-                else: raise RuntimeError("Called non callable value")
