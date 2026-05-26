@@ -18,4 +18,14 @@ fn main() -> int:
     fflush(stdout)
     fscanf(stdin, "%d", &number)
     fprintf(stdout, "%s %d\n", "Your number is", number)
+
+    if number > 67:
+        fprintf(stdout, "Bigger than 67\n")
+    elif number < 67:
+        fprintf(stdout, "Less than 67\n")
+    else: fprintf(stdout, "SIX SEVEN\n")
+
+    fflush(stdout)
+    fscanf(stdin, "\n")
+
     return 0

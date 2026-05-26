@@ -126,7 +126,7 @@ class Analyzer(IAnalyzer):
     def resolve_target_logic_conversion(self, a: Type, b: Type) -> Type:
         if a.is_ptr or b.is_ptr:
             return builtin_types.ptr_type
-        else: self.resolve_target_arithmetic_conversion(a, b)
+        else: return self.resolve_target_arithmetic_conversion(a, b)
 
     def inject_cast_if_needed(self, expr: Expression, target: Type) -> Expression:
         if expr.type != target:

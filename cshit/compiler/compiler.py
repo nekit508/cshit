@@ -112,7 +112,7 @@ class Compiler(ICompiler):
     builder_stack: Stack[Builder]
     name_provider: NameProvider
     operators_type_resolvers: dict[TokenType, Operator]
-    operators_map: dict[TokenType, str]
+    logic_operators_map: dict[TokenType, str]
 
     @inject
     def __init__(self, ast: File, source: str = Wire["input_file"], output: str = Wire["output_file"]):
@@ -130,8 +130,12 @@ class Compiler(ICompiler):
         self.builder_stack = Stack()
         self.builder_stack.append(Builder(self.builder_stack, dummy=True))
 
-        self.operators_map = {
-            TokenType.EQEQ: "=="
+        self.logic_operators_map = {
+            TokenType.EQEQ: "==",
+            TokenType.GT: ">",
+            TokenType.GE: ">=",
+            TokenType.LT: "<",
+            TokenType.LE: "<="
         }
 
     @property
@@ -228,7 +232,6 @@ class Compiler(ICompiler):
                           name = name)
         var, func = self.context.register_function(out)
         if not func:
-            print(self.context)
             raise CompileError(f"Cannot create function with name {name}, because var with same name already exists in this scope.")
         elif not var:
             raise CompileError(f"Cannot create function with name {name}, because func with same name already exists in this scope.")
@@ -280,9 +283,9 @@ class Compiler(ICompiler):
 
         for i in range(len(stmt.branches)):
             # compile expression and cbranch
-            if i != 0: self.ir_builder.position_at_start(conditions_starts[i])
+            if i != 0: self.ir_builder.position_at_start(conditions_starts[i-1])
             self.ir_builder.cbranch(self.compile_Expression(stmt.conditions[i]), branches_starts[i],
-                                    conditions_starts[i+1]
+                                    conditions_starts[i]
                                     if i != len(stmt.branches)-1 else
                                     (merge if stmt.else_block is None else branches_starts[-1])) # last one jumps into else block instead of not existing next elif
 
@@ -348,12 +351,9 @@ class Compiler(ICompiler):
 
             left, right = list(self.compile_Expression(operand) for operand in op.operands)
 
-            if op.operator not in self.operators_map:
-                raise CompileError(f"Unknown operator {op.operator}")
-            operator_map = self.operators_map[op.operator]
-
             if op.operator in builtin_types.logic_binary_operators:
-                if op.operator is TokenType.EQEQ:
+                if op.operator in self.logic_operators_map:
+                    operator_map = self.logic_operators_map[op.operator]
                     if op.operands_type in builtin_types.signed_integers:
                         return self.ir_builder.icmp_signed(operator_map, left, right)
                     elif op.operands_type in builtin_types.unsigned_integers:
@@ -361,6 +361,7 @@ class Compiler(ICompiler):
                     elif op.operands_type in builtin_types.floats:
                         return self.ir_builder.fcmp_ordered(operator_map, left, right)
                     else: CompileError(f"Unknown operands type {op.operands_type}")
+                else: CompileError(f"Operator {op.operator} is not mapped")
             elif op.operator in builtin_types.arithmetic_binary_operators:
                 raise NotImplementedError(builtin_types.arithmetic_binary_operators)
             else: raise CompileError(f"Unknown operator type {op.operator}")
@@ -368,7 +369,7 @@ class Compiler(ICompiler):
             if op.operator is TokenType.AMPERSAND:
                 if op.operands[0].kind is not ASTKind.IdentExpr:
                     raise CompileError("Can get address only of ident expressions")
-                return self.compile_IdentExpr_ref(op.operands[0]) # hope analyzer stripped all type errors
+                return self.compile_IdentExpr_ref(op.operands[0])
             else: raise CompileError(f"Unknown operator type {op.operator}")
         else: raise CompileError(f"Unable to compile non binary/unary op {op} yet")
 
