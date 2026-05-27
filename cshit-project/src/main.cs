@@ -5,14 +5,11 @@ fn main() -> int:
     stdout: ptr = fdopen(1, "w")
     num: int = 0
 
-    fprintf(stdout, "number:")
-    fflush(stdout)
-    fscanf(stdin, "%d", &num)
-
-    while num != 67:
+    do:
         fprintf(stdout, "number:")
         fflush(stdout)
         fscanf(stdin, "%d", &num)
+    while num != 67
     else:
         fprintf(stdout, "SIX SEVEN\n")
 
