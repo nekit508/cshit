@@ -8,7 +8,7 @@ from llvmlite.ir import Function, CallInstr, Value, NamedValue
 from .interfaces import ICompiler, CompileError
 from ..ast import FunctionDefinition, ASTKind, FunctionDeclaration, CodeBlock, Expression, \
     ConstExpression, File, FileMember, VarDeclaration, VarDefinition, CastExpression, CallExpression, Statement, \
-    IdentExpression, ReturnStatement, IfStatement, OpExpression, Operator
+    IdentExpression, ReturnStatement, IfStatement, OpExpression, Operator, WhileStatement
 from ..builtin_types import builtin_types
 from ..lex.interfaces import TokenType
 from ..recursive_dict import RecursiveDict
@@ -132,6 +132,7 @@ class Compiler(ICompiler):
 
         self.logic_operators_map = {
             TokenType.EQEQ: "==",
+            TokenType.NEQ: "!=",
             TokenType.GT: ">",
             TokenType.GE: ">=",
             TokenType.LT: "<",
@@ -263,12 +264,50 @@ class Compiler(ICompiler):
             return self.compile_VarDef(stmt)
         elif stmt.kind is ASTKind.VarDecl:
             return self.compile_VarDecl(stmt)
-        elif stmt.kind == ASTKind.IfStmt:
+        elif stmt.kind is ASTKind.IfStmt:
             return self.compile_IfStmt(stmt)
+        elif stmt.kind is ASTKind.WhileStmt:
+            return self.compile_WhileStmt(stmt)
         elif isinstance(stmt, Expression): # not any statement resolved - maybe it is Expression
             return self.compile_Expression(stmt)
 
         raise CompileError(f"Unknown statement {stmt} with kind {stmt.kind}")
+
+    def compile_WhileStmt(self, stmt: WhileStatement):
+        if stmt.do_while:
+            body_start = self.ir_builder.append_basic_block(self.random_name)
+            condition_start = self.ir_builder.append_basic_block(self.random_name)
+            merge = self.ir_builder.append_basic_block(self.random_name)
+
+            self.ir_builder.branch(body_start)
+
+            self.ir_builder.position_at_start(body_start)
+            self.compile_CodeBlock(stmt.body)
+            self.ir_builder.branch(condition_start)
+
+            self.ir_builder.position_at_start(condition_start)
+            self.ir_builder.cbranch(self.compile_Expression(stmt.condition), body_start, merge)
+
+            self.ir_builder.position_at_start(merge)
+            if stmt.end is not None:
+                self.compile_CodeBlock(stmt.end)
+        else:
+            condition_start = self.ir_builder.append_basic_block(self.random_name)
+            merge = self.ir_builder.append_basic_block(self.random_name)
+            body_start = self.ir_builder.append_basic_block(self.random_name)
+
+            self.ir_builder.branch(condition_start)
+
+            self.ir_builder.position_at_start(condition_start)
+            self.ir_builder.cbranch(self.compile_Expression(stmt.condition), body_start, merge)
+
+            self.ir_builder.position_at_start(body_start)
+            self.compile_CodeBlock(stmt.body)
+            self.ir_builder.branch(condition_start)
+
+            self.ir_builder.position_at_start(merge)
+            if stmt.end is not None:
+                self.compile_CodeBlock(stmt.end)
 
     def compile_IfStmt(self, stmt: IfStatement):
         branches_starts: list[ir.Branch] = []

@@ -1,23 +1,19 @@
 #import "src/std.cs"
 
-fn test() -> int:
-    a: int = 1
-
-    if a == 1:
-
-        b: int = 2
-
-        if b > 1:
-
-            c: int = 3
-
-            return c
-
-        return b
-
-    return 0
-
-
 fn main() -> int:
-    fprintf(fdopen(1, "w"), "test: %d\n", test())
+    stdin: ptr = fdopen(0, "r")
+    stdout: ptr = fdopen(1, "w")
+    num: int = 0
+
+    fprintf(stdout, "number:")
+    fflush(stdout)
+    fscanf(stdin, "%d", &num)
+
+    while num != 67:
+        fprintf(stdout, "number:")
+        fflush(stdout)
+        fscanf(stdin, "%d", &num)
+    else:
+        fprintf(stdout, "SIX SEVEN\n")
+
     return 0

@@ -30,6 +30,7 @@ class ASTKind(enum.Enum):
     ReturnStmt = "ReturnStmt"
     PassStmt = "PassStmt"
     IfStmt = "IfStmt"
+    WhileStmt = "WhileStmt"
 
     OpExpr = "OpExpr"
     ConstExpr = "ConstExpr"
@@ -223,6 +224,23 @@ class IfStatement(Statement):
     def __repr__(self) -> str:
         from cshit.utils import pretty_list
         return f"IfStmt<{pretty_list(list(f"{self.conditions[i]} -> {self.branches[i]}" for i in range(len(self.branches))), sep="; ")}{f" else: {self.else_block}" if self.else_block is not None else ""}>"
+
+
+class WhileStatement(Statement):
+    condition: Expression
+    body: CodeBlock
+    end: CodeBlock | None
+    do_while: bool # is this do...while cycle
+
+    def __init__(self, condition: Expression, body: CodeBlock, end: CodeBlock | None, do_while: bool):
+        self.kind = ASTKind.WhileStmt
+        self.condition = condition
+        self.body = body
+        self.end = end
+        self.do_while = do_while
+
+    def __repr__(self) -> str:
+        return f"WhileStmt<{f"do {self.body} while {self.condition}" if self.do_while else f"while {self.condition} {self.body}"}{"" if self.end is not None else f", {self.end}"}>"
 
 
 class VarDeclaration(FileMember, Statement):

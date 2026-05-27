@@ -305,9 +305,15 @@ class Analyzer(IAnalyzer):
             case ASTKind.IfStmt:
                 # noinspection PyTypeChecker
                 self.analyze_IfStmt(stmt)
-            case _:
+            case ASTKind.WhileStmt:
                 # noinspection PyTypeChecker
-                self.analyze_Expression(stmt)
+                self.analyze_WhileStmt(stmt)
+            case _:
+                try:
+                    # noinspection PyTypeChecker
+                    self.analyze_Expression(stmt)
+                except Exception as e:
+                    raise AnalyzerError(f"{e}")
 
     def analyze_IfStmt(self, stmt: IfStatement):
         for condition in stmt.conditions:
@@ -322,6 +328,30 @@ class Analyzer(IAnalyzer):
         if stmt.else_block is not None:
             with self.scope.child.w:
                 self.analyze_CodeBlock(stmt.else_block)
+
+    def analyze_WhileStmt(self, stmt: WhileStatement):
+        if stmt.do_while:
+            with self.scope.child.w:
+                self.analyze_CodeBlock(stmt.body)
+
+            self.analyze_Expression(stmt.condition)
+            if not self.is_convertible(stmt.condition.type, builtin_types.bool_type):
+                raise UncovertibleTypes(stmt.condition.type, builtin_types.bool_type)
+
+            if stmt.end is not None:
+                with self.scope.child.w:
+                    self.analyze_CodeBlock(stmt.end)
+        else:
+            self.analyze_Expression(stmt.condition)
+            if not self.is_convertible(stmt.condition.type, builtin_types.bool_type):
+                raise UncovertibleTypes(stmt.condition.type, builtin_types.bool_type)
+
+            with self.scope.child.w:
+                self.analyze_CodeBlock(stmt.body)
+
+            if stmt.end is not None:
+                with self.scope.child.w:
+                    self.analyze_CodeBlock(stmt.end)
 
     def analyze_ReturnStmt(self, ret: ReturnStatement):
         if self.func is None:

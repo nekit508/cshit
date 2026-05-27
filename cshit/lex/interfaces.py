@@ -51,6 +51,7 @@ class TokenType(enum.Enum):
     ELIF = "elif"
     ELSE = "else"
     WHILE = "while"
+    DO = "do"
     FOR = "for"
     RETURN = "return"
     PASS = "pass"

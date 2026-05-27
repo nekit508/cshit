@@ -1,23 +1,21 @@
-﻿from typing import Self, override
+﻿from token import COLON
+from typing import Self, override
 
 from another_dependency_injector.wiring import inject, Wire
 
-from .interfaces import IParser, WrongToken, MessageError
+from .interfaces import IParser, WrongToken, MessageError, ParserError
 from ..ast import Statement, \
     Expression, ConstExpression, OpExpression, IdentExpression, FunctionDeclaration, \
     TypeReference, VarDeclaration, FunctionDefinition, CodeBlock, ReturnStatement, File, FileMember, VarDefinition, \
-    CastExpression, CallExpression, GetExpression, Directive, ImportDirective, IfStatement
+    CastExpression, CallExpression, GetExpression, Directive, ImportDirective, IfStatement, WhileStatement
 from ..iname import INameProvider, IName
 from ..lex.interfaces import ILexer, TokenType, IToken
 from ..lex.lexer import Lexer
 from ..lex.source import FileSource
-from ..lex.token import Token
 from ..stack import View, Stack
 from ..utils import pretty_list
 
 d = -1
-
-class Parser(IParser): ...
 
 def tprint(*args, **kwargs):
     print(f"    " * d, end="")
@@ -66,7 +64,7 @@ class TokensView(View[IToken]):
 
 
 class Depth:
-    parser: Parser
+    parser: "Parser"
 
     def __init__(self, parser):
         self.parser = parser
@@ -225,13 +223,18 @@ class Parser(IParser):
     def parse_Statement(self) -> Statement | None:
         if self.probe_type(TokenType.IDENT) and self.probe_type(TokenType.COLON, offset=1):
             return self.parse_VarDefinition_or_VarDeclaration()
+        elif self.probe_type(TokenType.WHILE, TokenType.DO):
+            return self.parse_WhileStatement()
         elif self.probe_type(TokenType.IF):
             return self.parse_IfStatement()
         elif self.probe().type is TokenType.RETURN:
             self.consume()
             expr = self.parse_Expression_to_end_of_line()
             return ReturnStatement(expr)
-        return self.parse_Expression_to_end_of_line()
+        try:
+            return self.parse_Expression_to_end_of_line()
+        except:
+            raise ParserError(f"Unable to parse statement at {self.probe()}")
 
     def parse_IfStatement(self) -> IfStatement:
         conditions: list[Expression] = []
@@ -240,7 +243,7 @@ class Parser(IParser):
         self.accept(TokenType.IF)
         while len(conditions) == 0 or (self.next_level_is_same() and self.probe_type(TokenType.ELIF)):
             if len(conditions) != 0: self.consume()
-            with self.view.after_to_first_type(TokenType.COLON).to_end as v:
+            with self.view.after_to_first_type(TokenType.COLON).to_end:
                 conditions.append(self.parse_Expression())
             self.accept(TokenType.COLON)
             branches.append(self.parse_CodeBlock())
@@ -251,6 +254,45 @@ class Parser(IParser):
             self.accept(TokenType.COLON)
             negative = self.parse_CodeBlock()
         return IfStatement(conditions, branches, negative)
+
+    def parse_WhileStatement(self) -> WhileStatement:
+        start = self.accept(TokenType.DO, TokenType.WHILE)
+
+        end: CodeBlock | None = None
+
+        if start == TokenType.DO:
+            do = True
+            self.accept(TokenType.COLON)
+
+            body = self.parse_CodeBlock()
+
+            if not self.next_level_is_same():
+                raise ParserError(f"Unexpected dedent at {self.probe()}")
+            self.accept(TokenType.WHILE)
+            with self.view.after_to_first_type(TokenType.NEW_LINE).to_end:
+                condition = self.parse_Expression()
+
+            if self.next_level_is_same() and self.probe_type(TokenType.ELSE):
+                self.consume()
+                self.accept(TokenType.COLON)
+                end = self.parse_CodeBlock()
+        elif start == TokenType.WHILE:
+            do = False
+            with self.view.after_to_first_type(TokenType.COLON).to_end:
+                condition = self.parse_Expression()
+            self.accept(TokenType.COLON)
+
+            body = self.parse_CodeBlock()
+
+            if self.next_level_is_same() and self.probe_type(TokenType.ELSE):
+                self.consume()
+                self.accept(TokenType.COLON)
+                end = self.parse_CodeBlock()
+
+
+        else: raise ParserError(f"Unknown start of while statement {start}")
+
+        return WhileStatement(condition, body, end, do)
 
     @tfunc
     def parse_Expression_to_end_of_line(self) -> Expression | None:
@@ -439,9 +481,13 @@ class Parser(IParser):
             raise MessageError(f"Got empty code block at {self.view[start]}")
         return CodeBlock(statements)
 
-    def parse_CodeBlock(self, inc: bool = True) -> CodeBlock:
+    def parse_CodeBlock(self, branch_depth: bool = True) -> CodeBlock:
+        """
+        :param branch_depth: whether function increase depth itself
+        :return:
+        """
         print("pcb", self.probe())
-        if inc:
+        if branch_depth:
             with self.inc_depth:
                 return self._parse_CodeBlock()
         return self._parse_CodeBlock()
