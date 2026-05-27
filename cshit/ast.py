@@ -193,10 +193,10 @@ class CodeBlock(Statement):
 
 
 class ReturnStatement(Statement):
-    expr: Expression
+    expr: Expression | None
     type: Type
 
-    def __init__(self, expr: Expression):
+    def __init__(self, expr: Expression | None):
         self.kind = ASTKind.ReturnStmt
         self.expr = expr
 

@@ -8,6 +8,7 @@ from .token import Token
 class Lexer(ILexer):
     indent_size: int
     indent: str
+    ignored_chars: list[str]
 
     @inject
     def __init__(self, source: ISource = Wire[ISource], ident_size: int = 4):
@@ -18,6 +19,10 @@ class Lexer(ILexer):
 
         self.indent_size = ident_size
         self.indent = " " * self.indent_size
+
+        self.ignored_chars = [
+            "\r"
+        ]
 
     def to_end(self) -> int:
         return len(self.source) - self.pos
@@ -31,8 +36,13 @@ class Lexer(ILexer):
         return self.source[self.pos]
 
     def advance(self) -> str:
-        ch = self.peek()
-        self.pos += 1
+        while True: # scan to next not ignored char
+            ch = self.peek()
+            self.pos += 1
+
+            if ch not in self.ignored_chars:
+                break
+
         if ch == "\n":
             self.line += 1
             self.col = 1

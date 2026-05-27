@@ -13,7 +13,7 @@ class TokenType(enum.Enum):
     DOT = "."
     COLON = ":"
     SEMICOLON = ";"
-    UNDERSCORE = "_"
+    #UNDERSCORE = "_"
 
     PLUS = "+"
     MINUS = "-"

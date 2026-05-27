@@ -1,31 +1,23 @@
 #import "src/std.cs"
 
-stdout: ptr = 0
-stdin: ptr = 0
+fn test() -> int:
+    a: int = 1
 
-fn open_stdout() -> ptr:
-    return fdopen(1, "w")
+    if a == 1:
 
-fn open_stdin() -> ptr:
-    return fdopen(0, "r")
+        b: int = 2
+
+        if b > 1:
+
+            c: int = 3
+
+            return c
+
+        return b
+
+    return 0
+
 
 fn main() -> int:
-    stdout = open_stdout()
-    stdin = open_stdin()
-
-    number: int
-    fputs("Enter ur number: ", stdout)
-    fflush(stdout)
-    fscanf(stdin, "%d", &number)
-    fprintf(stdout, "%s %d\n", "Your number is", number)
-
-    if number > 67:
-        fprintf(stdout, "Bigger than 67\n")
-    elif number < 67:
-        fprintf(stdout, "Less than 67\n")
-    else: fprintf(stdout, "SIX SEVEN\n")
-
-    fflush(stdout)
-    fscanf(stdin, "\n")
-
+    fprintf(fdopen(1, "w"), "test: %d\n", test())
     return 0

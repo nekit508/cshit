@@ -238,7 +238,9 @@ class Compiler(ICompiler):
         return out
 
     def compile_ReturnStmt(self, stmt: ReturnStatement):
-        self.ir_builder.ret(self.compile_Expression(stmt.expr))
+        if stmt.type == builtin_types.void_type:
+            self.ir_builder.ret_void()
+        else: self.ir_builder.ret(self.compile_Expression(stmt.expr))
 
     def compile_FuncDef(self, func_def: FunctionDefinition) -> ir.Function:
         out = self.compile_FuncDecl(func_def.decl)

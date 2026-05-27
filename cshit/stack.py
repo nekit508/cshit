@@ -208,3 +208,6 @@ class View[T](StackableObject):
     @property
     def reversed(self) -> ReverseViewIterProvider[T]:
         return ReverseViewIterProvider(self.data, self.start, self.to_absolute(self.pos), self.end)
+
+    def __len__(self):
+        return self.len

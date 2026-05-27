@@ -324,10 +324,13 @@ class Analyzer(IAnalyzer):
                 self.analyze_CodeBlock(stmt.else_block)
 
     def analyze_ReturnStmt(self, ret: ReturnStatement):
-        self.analyze_Expression(ret.expr)
-        ret.type = ret.expr.type
-
         if self.func is None:
-            raise AnalyzerError("Return out of function body")
+            raise AnalyzerError("Return not in function body")
+
+        if ret.expr is not None:
+            self.analyze_Expression(ret.expr)
+            ret.type = ret.expr.type
+        else: ret.type = builtin_types.void_type
+
         if not self.is_convertible(ret.type, self.func.ret):
             raise UncovertibleTypes(ret.type, self.func.ret)

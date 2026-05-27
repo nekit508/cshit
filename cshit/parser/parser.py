@@ -222,7 +222,7 @@ class Parser(IParser):
     def parse_Name(self) -> IName:
         return self.name_provider.simple(self.accept(TokenType.IDENT).value_str)
 
-    def parse_Statement(self) -> Statement:
+    def parse_Statement(self) -> Statement | None:
         if self.probe_type(TokenType.IDENT) and self.probe_type(TokenType.COLON, offset=1):
             return self.parse_VarDefinition_or_VarDeclaration()
         elif self.probe_type(TokenType.IF):
@@ -253,10 +253,10 @@ class Parser(IParser):
         return IfStatement(conditions, branches, negative)
 
     @tfunc
-    def parse_Expression_to_end_of_line(self) -> Expression:
+    def parse_Expression_to_end_of_line(self) -> Expression | None:
         tprint("expr_teol", self.view)
         with self.view.after_to_first_type(TokenType.NEW_LINE, TokenType.EOF).to_end:
-            return self.parse_Expression()
+            return self.parse_Expression() if self.view.len != 0 else None
 
     @tfunc
     def parse_Expression(self) -> Expression:
@@ -291,7 +291,7 @@ class Parser(IParser):
 
         # parse unary operator
         if self.view[0] in self.unary_operators:
-            if self.view == 1:
+            if self.view.len == 1:
                 raise MessageError(f"Found single unary operator {self.view[0]}")
             with self.view.after(1).ignore:
                 expr = self.parse_Expression()
@@ -349,7 +349,7 @@ class Parser(IParser):
         prev = 0
         for ind, token in self.view:
             depth, _ = self.handle_depth(token, depth)
-            if depth == 0 and self.probe(ind) == TokenType.COMMA:
+            if depth == 0 and self.view[ind] == TokenType.COMMA:
                 with self.view.sub_view(prev, ind).ignore:
                     out.append(self.parse_Expression())
                 prev = ind+1
@@ -372,7 +372,7 @@ class Parser(IParser):
         return TypeReference(name, is_ptr)
 
     def parse_VarDeclaration(self, must_parse_name: bool = True) -> VarDeclaration:
-        if must_parse_name or (self.view.len - self.view.pos > 1 and self.probe(1) == TokenType.COLON):
+        if must_parse_name or (self.probe_type(TokenType.COLON, offset=1)):
             name = self.parse_Name()
             self.accept(TokenType.COLON)
             type_ref = self.parse_TypeReference()
@@ -428,7 +428,9 @@ class Parser(IParser):
         statements: list[Statement] = []
 
         while self.next_level_is_same():
-            statements.append(self.parse_Statement())
+            stmt = self.parse_Statement()
+            if stmt is not None:
+                statements.append(stmt)
 
         #if self.probe_type(TokenType.NEW_LINE):
         #    self.consume()

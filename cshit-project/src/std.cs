@@ -13,3 +13,6 @@ fn fscanf(ptr, char*, ...) -> int
 fn fflush(ptr) -> int
 
 fn Sleep(int) -> void
+
+fn __chkstk() -> void:
+    return

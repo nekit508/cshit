@@ -1,7 +1,7 @@
 ﻿COMPILER = D:\projects\python\compiler\.venv\Scripts\python.exe ../main.py
-LINKER = ld --subsystem console
+LINKER = ld
 
-LIBRARIES = -L"D:/soft/mingw64/x86_64-w64-mingw32/lib" -lmsvcrt -lkernel32 -e main
+LIBRARIES = --subsystem console -L"D:/soft/mingw64/x86_64-w64-mingw32/lib" -lgcc_s -lmingw32 -lgcc_s -lmsvcrt -lkernel32 -e main
 
 BUILD_DIR = ./build/
 INCLUDE_DIR = ./include/

@@ -70,7 +70,6 @@ class BuiltinTypes:
             self.int_type,
             self.char_type,
             self.bool_type,
-            self.void_type,
             self.ptr_type,
         ]
 
