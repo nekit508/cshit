@@ -1,10 +1,10 @@
 ﻿import enum
 from collections.abc import Callable
+from typing import Literal
 
-from .builtin_types import builtin_types
 from .iname import IName
 from .lex.interfaces import TokenType
-from .types import Type, FunctionType
+from .types import Type, FunctionType, StructureType
 
 
 class Operator:
@@ -24,6 +24,7 @@ class ASTKind(enum.Enum):
     FuncDecl = "FuncDecl"
     VarDecl = "VarDecl"
     VarDef = "VarDef"
+    StructDecl = "StructDecl"
 
     CodeBlock = "CodeBlock"
 
@@ -46,6 +47,10 @@ class ASTKind(enum.Enum):
 
 class AST:
     kind: ASTKind
+    analyzed: bool = False
+
+    def invalidate(self):
+        self.analyzed = False
 
 
 class TypeReference(AST):
@@ -64,6 +69,10 @@ class TypeReference(AST):
 
 
 class FileMember(AST):
+    pass
+
+
+class StructMember(AST):
     pass
 
 
@@ -243,7 +252,7 @@ class WhileStatement(Statement):
         return f"WhileStmt<{f"do {self.body} while {self.condition}" if self.do_while else f"while {self.condition} {self.body}"}{"" if self.end is not None else f", {self.end}"}>"
 
 
-class VarDeclaration(FileMember, Statement):
+class VarDeclaration(FileMember, Statement, StructMember):
     name: IName | None
     type_ref: TypeReference
 
@@ -257,7 +266,7 @@ class VarDeclaration(FileMember, Statement):
     def __repr__(self) -> str:
         return f"{self.name if self.name is not None else "<NA>"} {self.type_ref}"
 
-class VarDefinition(FileMember, Statement):
+class VarDefinition(FileMember, Statement, StructMember):
     decl: VarDeclaration
     initial_value: Expression
 
@@ -270,7 +279,7 @@ class VarDefinition(FileMember, Statement):
         return f"{self.decl} = {self.initial_value}"
 
 
-class FunctionDeclaration(FileMember):
+class FunctionDeclaration(FileMember, StructMember):
     name: IName
     ret: TypeReference
     params: list[VarDeclaration]
@@ -290,7 +299,7 @@ class FunctionDeclaration(FileMember):
         return f"fn {self.name} ({pretty_list(self.params)}{f", ..." if self.var_arg else ""}) -> {self.ret}"
 
 
-class FunctionDefinition(FileMember):
+class FunctionDefinition(FileMember, StructMember):
     decl: FunctionDeclaration
     code: CodeBlock
 
@@ -301,3 +310,24 @@ class FunctionDefinition(FileMember):
 
     def __repr__(self) -> str:
         return f"{self.decl}: {self.code}"
+
+
+class StructDeclaration(FileMember):
+    name: IName
+    fields: list[VarDeclaration | VarDefinition]
+    methods: list[FunctionDeclaration | FunctionDefinition]
+
+    type: StructureType
+
+    def __init__(self,
+                 name: IName,
+                 fields: list[VarDeclaration | VarDefinition],
+                 methods: list[FunctionDeclaration | FunctionDefinition]):
+        self.kind = ASTKind.StructDecl
+        self.name = name
+        self.fields = fields
+        self.methods = methods
+
+    def __repr__(self) -> str:
+        from cshit.utils import pretty_list
+        return f"Struct<{self.name.actual()}[{pretty_list(self.fields)}][{pretty_list(self.methods)}]>"

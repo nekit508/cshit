@@ -47,6 +47,7 @@ class TokenType(enum.Enum):
     VOID_POINTER = "(*)"
 
     FN = "fn"
+    STRUCT = "struct"
     IF = "if"
     ELIF = "elif"
     ELSE = "else"

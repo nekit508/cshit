@@ -4,11 +4,9 @@ from another_dependency_injector.wiring import inject, Wire
 from llvmlite import ir
 
 from .iname import IName, INameProvider
-from .utils import pretty_list
 
 
 class PtrType: ...
-
 
 # abstract
 class Type:
@@ -31,7 +29,7 @@ class Type:
     def de_ptr(self) -> Self:
         if isinstance(self, PtrType):
             return self.enclosing
-        return self
+        raise NotImplementedError("Cannot de-ptr not ptr type")
 
     @property
     def is_ptr(self):
@@ -44,6 +42,17 @@ class Type:
     @property
     def is_primitive(self):
         return isinstance(self, PrimitiveType)
+
+    @property
+    def is_structure(self):
+        return isinstance(self, StructureType)
+
+
+# abstract
+class ContainerType(Type):
+    def get_member(self, name: str) -> Type:
+        raise NotImplementedError
+
 
 class PtrType(Type):
     enclosing: Type
@@ -87,6 +96,7 @@ class FunctionType(NamedType):
         self.var_arg = var_arg
 
     def __repr__(self) -> str:
+        from .utils import pretty_list
         return f"{self.name().actual()}({pretty_list(self.params)}) -> {self.ret}"
 
     def as_native(self) -> ir.types.Type:
@@ -126,3 +136,43 @@ class PrimitiveType(NamedType):
 
     def __repr__(self) -> str:
         return f"{self.type}"
+
+
+class StructureType(NamedType, ContainerType):
+    fields: dict[str, Type]
+    fields_idx: dict[str, int]
+    methods: dict[str, FunctionType]
+    _structure_instance: "StructureInstance"
+
+    def __init__(self, full_name: IName, fields: dict[str, Type], methods: dict[str, FunctionType]):
+        super().__init__(full_name)
+        self.fields = fields
+        self.methods = methods
+        self._structure_instance = StructureInstance(self)
+
+    def __repr__(self) -> str:
+        from .utils import pretty_dict
+        return f"{self.name().actual()}<fields:[{pretty_dict(self.fields)}] methods:[{pretty_dict(self.methods)}]>"
+
+    def get_member(self, name: str) -> "Type":
+        return self.fields[name] or self.methods[name]
+
+    def as_ptr(self) -> PtrType:
+        raise NotImplementedError("Cannot get ptr of structure type")
+
+    def get_instance(self) -> "StructureInstance":
+        return self._structure_instance
+
+
+class StructureInstance(NamedType, ContainerType):
+    structure_type: StructureType
+
+    def __init__(self, structure_type: StructureType):
+        super().__init__(structure_type.full_name)
+        self.structure_type = structure_type
+
+    def __repr__(self) -> str:
+        return f"StructureInstance<{self.structure_type}>"
+
+    def get_member(self, name: str) -> "Type":
+        return self.structure_type.fields[name] or self.structure_type.methods[name]

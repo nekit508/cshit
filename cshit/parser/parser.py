@@ -7,7 +7,8 @@ from .interfaces import IParser, WrongToken, MessageError, ParserError
 from ..ast import Statement, \
     Expression, ConstExpression, OpExpression, IdentExpression, FunctionDeclaration, \
     TypeReference, VarDeclaration, FunctionDefinition, CodeBlock, ReturnStatement, File, FileMember, VarDefinition, \
-    CastExpression, CallExpression, GetExpression, Directive, ImportDirective, IfStatement, WhileStatement
+    CastExpression, CallExpression, GetExpression, Directive, ImportDirective, IfStatement, WhileStatement, \
+    StructDeclaration, StructMember, ASTKind
 from ..iname import INameProvider, IName
 from ..lex.interfaces import ILexer, TokenType, IToken
 from ..lex.lexer import Lexer
@@ -465,6 +466,38 @@ class Parser(IParser):
 
         return FunctionDeclaration(name, type_ref, params, var_arg)
 
+    def parse_StructDeclaration(self) -> StructDeclaration:
+        fields: list[VarDeclaration | VarDefinition] = []
+        methods: list[FunctionDeclaration | FunctionDefinition] = []
+
+        self.accept(TokenType.STRUCT)
+        name = self.parse_Name()
+        self.accept(TokenType.COLON)
+
+        with self.inc_depth:
+            while self.next_level_is_same():
+                member: StructMember = self.parse_StructMember()
+                if member.kind in [ASTKind.VarDef, ASTKind.VarDecl]:
+                    # noinspection PyTypeChecker
+                    member: VarDeclaration | VarDefinition = member
+                    fields.append(member)
+                elif member.kind in [ASTKind.FuncDef, ASTKind.FuncDecl]:
+                    # noinspection PyTypeChecker
+                    member: FunctionDeclaration | FunctionDefinition = member
+                    methods.append(member)
+                else: raise NotImplementedError(member.kind)
+
+        return StructDeclaration(name, fields, methods)
+
+    def parse_StructMember(self) -> StructMember:
+        token = self.probe()
+
+        if token == TokenType.FN:
+            return self.parse_FunctionDefinition_or_FunctionDeclaration()
+        elif token == TokenType.IDENT:
+            return self.parse_VarDefinition_or_VarDeclaration()
+        else: raise ParserError(f"Unknown start of struct member {token}")
+
     def _parse_CodeBlock(self) -> CodeBlock:
         start = self.view.pos
         statements: list[Statement] = []
@@ -517,6 +550,8 @@ class Parser(IParser):
                 members.append(self.parse_VarDefinition_or_VarDeclaration())
             elif token.type is TokenType.CRATE:
                 self.handle_directive(members, self.parse_Directive())
+            elif token.type is TokenType.STRUCT:
+                members.append(self.parse_StructDeclaration())
             else:
                 raise MessageError(f"Unexpected start of File member {token}")
             self.skip_white_spaces()

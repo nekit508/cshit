@@ -8,7 +8,8 @@ from llvmlite.ir import Function, CallInstr, Value, NamedValue
 from .interfaces import ICompiler, CompileError
 from ..ast import FunctionDefinition, ASTKind, FunctionDeclaration, CodeBlock, Expression, \
     ConstExpression, File, FileMember, VarDeclaration, VarDefinition, CastExpression, CallExpression, Statement, \
-    IdentExpression, ReturnStatement, IfStatement, OpExpression, Operator, WhileStatement
+    IdentExpression, ReturnStatement, IfStatement, OpExpression, Operator, WhileStatement, StructDeclaration, \
+    GetExpression
 from ..builtin_types import builtin_types
 from ..lex.interfaces import TokenType
 from ..recursive_dict import RecursiveDict
@@ -224,6 +225,28 @@ class Compiler(ICompiler):
         elif file_member.kind is ASTKind.FuncDef:
             # noinspection PyTypeChecker
             self.compile_FuncDef(file_member)
+        elif file_member.kind is ASTKind.StructDecl:
+            # noinspection PyTypeChecker
+            self.compile_StructDecl(file_member)
+        else: raise NotImplementedError(file_member.kind)
+
+    def compile_StructDecl(self, struct: StructDeclaration) -> ir.IdentifiedStructType:
+        native_type = self.module.context.get_identified_type(struct.name.actual())
+        analyzed_type = struct.type
+
+        body: list[Type | None] = [None] * len(analyzed_type.fields_idx)
+        for name in analyzed_type.fields_idx:
+            body[analyzed_type.fields_idx[name]] = analyzed_type.fields[name]
+
+        native_type.set_body(body)
+
+        with self.context.child:
+            for member in struct.methods:
+                if member.kind is ASTKind.FuncDecl:
+                    self.compile_FuncDecl(member)
+                else: self.compile_FuncDef(member)
+
+        return native_type
 
     def compile_FuncDecl(self, decl: FunctionDeclaration) -> ir.Function:
         name = decl.name.actual()
@@ -368,7 +391,7 @@ class Compiler(ICompiler):
         return value
 
     # noinspection PyTypeChecker
-    def compile_Expression(self, expr: Expression) -> ir.Value:
+    def compile_Expression(self, expr: Expression, ref: bool = False) -> ir.Value:
         if expr.kind is ASTKind.ConstExpr:
             return self.compile_ConstExpr(expr)
         elif expr.kind is ASTKind.CastExpr:
@@ -376,18 +399,25 @@ class Compiler(ICompiler):
         elif expr.kind is ASTKind.CallExpr:
             return self.compile_CallExpr(expr)
         elif expr.kind is ASTKind.IdentExpr:
-            return self.compile_IdentExpr_get(expr)
+            return self.compile_IdentExpr(expr, ref)
+        elif expr.kind is ASTKind.GetExpr:
+            return self.compile_GetExpr(expr, ref)
         elif expr.kind is ASTKind.OpExpr:
             return self.compile_OpExpr(expr)
 
         raise CompileError(f"Unknown expression {expr} with type {expr.kind}")
 
+    def compile_GetExpr(self, get: GetExpression, ref: bool) -> ir.Value:
+        accessed = self.compile_Expression(get.left, ref)
+        name = get.right.actual()
+
+        return self.ir_builder.gep() if ref else self.ir_builder.extract_value(accessed, )
+
     def compile_OpExpr(self, op: OpExpression) -> ir.Value:
         if len(op.operands) == 2:
             if op.operator is TokenType.EQ:
-                if op.operands[0].kind is not ASTKind.IdentExpr:
-                    raise CompileError("Can set only ident expressions")
-                left, right = self.compile_IdentExpr_ref(op.operands[0]), self.compile_Expression(op.operands[1])
+                # noinspection PyTypeChecker
+                left, right = self.compile_Expression(op.operands[0], True), self.compile_Expression(op.operands[1])
                 return self.ir_builder.store(right, left)
 
             left, right = list(self.compile_Expression(operand) for operand in op.operands)
@@ -410,15 +440,13 @@ class Compiler(ICompiler):
             if op.operator is TokenType.AMPERSAND:
                 if op.operands[0].kind is not ASTKind.IdentExpr:
                     raise CompileError("Can get address only of ident expressions")
-                return self.compile_IdentExpr_ref(op.operands[0])
+                # noinspection PyTypeChecker
+                return self.compile_IdentExpr(op.operands[0], True)
             else: raise CompileError(f"Unknown operator type {op.operator}")
         else: raise CompileError(f"Unable to compile non binary/unary op {op} yet")
 
-    def compile_IdentExpr_ref(self, expr: IdentExpression) -> ir.Value:
-        return self.require_var(expr.name.actual())
-
-    def compile_IdentExpr_get(self, expr: IdentExpression) -> NamedValue:
-        return self.ir_builder.access_value(self.require_var(expr.name.actual()))
+    def compile_IdentExpr(self, expr: IdentExpression, ref: bool) -> NamedValue:
+        return self.require_var(expr.name.actual()) if ref else self.ir_builder.access_value(self.require_var(expr.name.actual()))
 
     def compile_CallExpr(self, expr: CallExpression) -> CallInstr:
         if expr.called.kind is ASTKind.IdentExpr:

@@ -1,15 +1,18 @@
 ﻿from typing import Any, Self, Literal
 
+from another_dependency_injector.wiring import inject, Wire
 from llvmlite.ir import FloatType, IntType, VoidType
 
 from .interfaces import IAnalyzer, UnresolvedType, TypesMismatch
 from ..ast import *
 from ..builtin_types import *
 from ..compiler.interfaces import CompileError
+from ..iname import INameProvider
 from ..lex.token import Token
 from ..recursive_dict import RecursiveDict
 from ..stack import StackableObject, Stack
-from ..types import PrimitiveType, NamedType, Type
+from ..types import PrimitiveType, NamedType, Type, StructureType, ContainerType
+from ..utils import pretty_list
 from ..visitor import ASTVisitor
 
 
@@ -21,6 +24,9 @@ class AnalyzerError(Exception):
 
     def __repr__(self) -> str:
         return f"AnalyzerError: {self.message}"
+
+    def __str__(self) -> str:
+        return repr(self)
 
 
 class UncovertibleTypes(AnalyzerError):
@@ -63,15 +69,23 @@ class Scope(StackableObject):
         return self.to()
 
 
+@inject
 class Analyzer(IAnalyzer):
     scopes: Stack[Scope]
     func: FunctionType | None
+    name_provider: INameProvider
+    ref_providers: list[ASTKind]
 
-    def __init__(self):
+    def __init__(self, name_provider: INameProvider = Wire[INameProvider]):
+        self.name_provider = name_provider
         self.scopes = Stack()
         self.scopes.append(Scope(self.scopes, None))
         self.func = None
-        for name in builtin_types.map: # add builtin type to analyzer indexing
+        self.ref_providers = [
+            ASTKind.IdentExpr,
+            ASTKind.GetExpr
+        ]
+        for name in builtin_types.map:
             if not self.scope.types.register(name, builtin_types.map[name]):
                 raise AnalyzerError(f"Second declaration of type with name {name}")
 
@@ -80,12 +94,14 @@ class Analyzer(IAnalyzer):
         return self.scopes.top()
 
     def analyze(self, ast: AST):
+        pass
         if ast.kind == ASTKind.File:
             # noinspection PyTypeChecker
             ast: File = ast
             for member in ast.members:
                 self.analyze_FileMember(member)
         else: raise AnalyzerError("Expected file")
+        pass
         #breakpoint()
 
     def register_var(self, name: str, typ: Type):
@@ -136,6 +152,9 @@ class Analyzer(IAnalyzer):
         else: return expr
 
     def analyze_TypeRef(self, ref: TypeReference):
+        if ref.analyzed: return
+        else: ref.analyzed = True
+
         ref.type = self.scope.types[ref.name.actual()]
         if ref.type is None: raise UndefinedSymbol(ref.name.actual(), "Type")
         if ref.is_ptr: ref.type = ref.type.as_ptr()
@@ -154,8 +173,48 @@ class Analyzer(IAnalyzer):
             case ASTKind.VarDef:
                 # noinspection PyTypeChecker
                 self.analyze_VarDef(member)
+            case ASTKind.StructDecl:
+                # noinspection PyTypeChecker
+                self.analyze_StructDecl(member)
+            case _:
+                raise NotImplementedError(member.kind)
+
+    def analyze_StructDecl(self, struct: StructDeclaration):
+        if struct.analyzed: return
+        else: struct.analyzed = True
+
+        structure_type = StructureType(struct.name, {}, {})
+        self.register_type_unique(struct.name.actual(), structure_type) # register struct existence for correct declarations
+
+        with self.scope.child.w: # we will dump all new symbols in scope, because structure's members accessed via struct type
+            for field in struct.fields:
+                decl = field if field.kind is ASTKind.VarDecl else field.decl
+                self.analyze_VarDecl(decl)
+                structure_type.fields[decl.name.actual()] = decl.type
+            for method in struct.methods:
+                decl = method if method.kind is ASTKind.FuncDecl else method.decl
+                name = decl.name.actual()
+                decl.name = self.name_provider.simple(struct.name.actual() + "^" + name)
+                self.analyze_FuncDecl(decl)
+                structure_type.methods[name] = decl.type
+
+        # now all declarations are processed and stored in structure type, we can handle code correctly
+        with self.scope.child.w:
+            self.register_var("self", structure_type)
+
+            for field in struct.fields:
+                if field.kind is ASTKind.VarDef:
+                    self.analyze_VarDef(field)
+            for field in struct.methods:
+                if field.kind is ASTKind.FuncDef:
+                    self.analyze_FuncDef(field)
+
+        struct.type = structure_type
 
     def analyze_FuncDef(self, func_def: FunctionDefinition, add: bool = True):
+        if func_def.analyzed: return
+        else: func_def.analyzed = True
+
         self.analyze_FuncDecl(func_def.decl, add)
 
         with self.scope.child.w:
@@ -165,6 +224,9 @@ class Analyzer(IAnalyzer):
             self.analyze_CodeBlock(func_def.code)
 
     def analyze_FuncDecl(self, decl: FunctionDeclaration, add: bool = True):
+        if decl.analyzed: return
+        else: decl.analyzed = True
+
         self.analyze_TypeRef(decl.ret)
         for param in decl.params:
             self.analyze_VarDecl(param, False)
@@ -179,6 +241,9 @@ class Analyzer(IAnalyzer):
         if add: self.register_func_unique(decl.name.actual(), decl.type)
 
     def analyze_VarDef(self, var_def: VarDefinition, add: bool = True):
+        if var_def.analyzed: return
+        else: var_def.analyzed = True
+
         self.analyze_VarDecl(var_def.decl, add)
         if var_def.initial_value is not None:
             self.analyze_Expression(var_def.initial_value)
@@ -186,6 +251,11 @@ class Analyzer(IAnalyzer):
                 raise UncovertibleTypes(var_def.initial_value.type, var_def.decl.type)
 
     def analyze_VarDecl(self, decl: VarDeclaration, add: bool = True):
+        if decl.analyzed: return
+        else: decl.analyzed = True
+
+        if hasattr(decl, "type"): return
+
         self.analyze_TypeRef(decl.type_ref)
         decl.type = decl.type_ref.type
 
@@ -208,9 +278,33 @@ class Analyzer(IAnalyzer):
             case ASTKind.OpExpr:
                 # noinspection PyTypeChecker
                 self.analyze_OpExpr(expr)
+            case ASTKind.GetExpr:
+                # noinspection PyTypeChecker
+                self.analyze_GetExpr(expr)
             case _: raise NotImplementedError(expr.kind)
+        
+    def analyze_GetExpr(self, get: GetExpression):
+        if get.analyzed: return
+        else: get.analyzed = True
+
+
+        self.analyze_Expression(get.left)
+
+        if not isinstance(get.left.type, ContainerType):
+            raise AnalyzerError(f"Type {get.left.type} is not a container type")
+
+        name = get.right.actual()
+        accessed = get.left.type.get_member(name)
+        if accessed is None:
+            raise UndefinedSymbol(name, f"{get.left.type} member")
+
+        get.type = accessed
+
 
     def analyze_OpExpr(self, op: OpExpression):
+        if op.analyzed: return
+        else: op.analyzed = True
+
         if len(op.operands) == 2:
             for operand in op.operands:
                 self.analyze_Expression(operand)
@@ -219,8 +313,8 @@ class Analyzer(IAnalyzer):
             left, right = op.operands
 
             if operator is TokenType.EQ:
-                if op.operands[0].kind is not ASTKind.IdentExpr: raise AnalyzerError(f"Left operand of = op must be ident but {op.operands[0].kind}")
-                if left.type.is_func: # TODO reject be final/variable
+                if op.operands[0].kind not in self.ref_providers: raise AnalyzerError(f"Left operand of \"=\" must one of {pretty_list(self.ref_providers)}")
+                if left.type.is_func:
                     raise AnalyzerError("Cannot set function")
 
                 op.type = left.type
@@ -235,15 +329,20 @@ class Analyzer(IAnalyzer):
             else: raise AnalyzerError(f"Unknown binary operator type {operator}")
         elif len(op.operands) == 1:
             if op.operator is TokenType.AMPERSAND:
-                operand = op.operands[0]
+                operand: Expression = op.operands[0]
                 if operand.kind is not ASTKind.IdentExpr:
                     raise AnalyzerError("Can take address only of named variable")
+                # noinspection PyTypeChecker
+                operand: IdentExpression = operand
                 self.analyze_IdentExpr(operand, (True, True, False))
                 op.type = op.operands_type = operand.type.as_ptr()
             else: raise AnalyzerError(f"Unknown unary operator type {op.operator}")
         else:raise NotImplementedError("Non binary/unary operators")
 
     def analyze_ConstExpr(self, const: ConstExpression):
+        if const.analyzed: return
+        else: const.analyzed = True
+
         typ = type(const.value)
 
         if typ is int:
@@ -256,7 +355,10 @@ class Analyzer(IAnalyzer):
             const.type = builtin_types.char_type.as_ptr()
         else: AnalyzerError(f"Value {const} has wrong type {typ}")
 
-    def analyze_IdentExpr(self, ident: IdentExpression, required: tuple[bool, bool, bool] = (True, True, True)): # 1) var 2) func 3) type
+    def analyze_IdentExpr(self, ident: IdentExpression, required: tuple[bool, bool, bool] = (True, True, False)):
+        if ident.analyzed: return
+        else: ident.analyzed = True
+
         var, func, typ = required
         name = ident.name.actual()
 
@@ -267,10 +369,13 @@ class Analyzer(IAnalyzer):
             out = self.scope.functions.resolve(name)
         if typ and out is None:
             out = self.scope.types.resolve(name)
-        if out is None: raise UndefinedSymbol(name, "Symbol")
+        if out is None: raise UndefinedSymbol(name, f"Symbol (searched in (variables, functions, types) {required})")
         ident.type = out
 
     def analyze_CallExpr(self, call: CallExpression):
+        if call.analyzed: return
+        else: call.analyzed = True
+
         self.analyze_Expression(call.called)
 
         typ = call.called.type
@@ -288,6 +393,9 @@ class Analyzer(IAnalyzer):
                 raise UncovertibleTypes(param.type, typ.params[i])
 
     def analyze_CodeBlock(self, block: CodeBlock):
+        if block.analyzed: return
+        else: block.analyzed = True
+
         for statement in block.statements:
             self.analyze_Statement(statement)
 
@@ -316,6 +424,9 @@ class Analyzer(IAnalyzer):
                     raise AnalyzerError(f"{e}")
 
     def analyze_IfStmt(self, stmt: IfStatement):
+        if stmt.analyzed: return
+        else: stmt.analyzed = True
+
         for condition in stmt.conditions:
             self.analyze_Expression(condition)
             if not self.is_convertible(condition.type, builtin_types.bool_type):
@@ -330,6 +441,9 @@ class Analyzer(IAnalyzer):
                 self.analyze_CodeBlock(stmt.else_block)
 
     def analyze_WhileStmt(self, stmt: WhileStatement):
+        if stmt.analyzed: return
+        else: stmt.analyzed = True
+
         if stmt.do_while:
             with self.scope.child.w:
                 self.analyze_CodeBlock(stmt.body)
@@ -354,6 +468,9 @@ class Analyzer(IAnalyzer):
                     self.analyze_CodeBlock(stmt.end)
 
     def analyze_ReturnStmt(self, ret: ReturnStatement):
+        if ret.analyzed: return
+        else: ret.analyzed = True
+
         if self.func is None:
             raise AnalyzerError("Return not in function body")
 
