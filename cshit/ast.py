@@ -254,17 +254,15 @@ class WhileStatement(Statement):
 
 class VarDeclaration(FileMember, Statement, StructMember):
     name: IName | None
-    type_ref: TypeReference
+    type: TypeReference
 
-    type: Type
-
-    def __init__(self, name: IName | None, type_ref: TypeReference):
+    def __init__(self, name: IName | None, type: TypeReference):
         self.kind = ASTKind.VarDecl
         self.name = name
-        self.type_ref = type_ref
+        self.type = type
 
     def __repr__(self) -> str:
-        return f"{self.name if self.name is not None else "<NA>"} {self.type_ref}"
+        return f"{self.name if self.name is not None else "<NA>"} {self.type}"
 
 class VarDefinition(FileMember, Statement, StructMember):
     decl: VarDeclaration

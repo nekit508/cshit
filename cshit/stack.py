@@ -1,32 +1,31 @@
-﻿from ast import Index
-from dataclasses import dataclass
+﻿from dataclasses import dataclass
 from typing import Self, Any, Callable
 
 from cshit.utils import pretty_list
 
 
-class StackableObject: ...
-class StackableObjectRef: ...
-
-
-class Stack[T:StackableObject](list[T]):
+class Stack[T:"StackableObject"](list[T]):
     def __init__(self):
         super().__init__()
 
     def push(self, obj: T):
         self.append(obj)
 
+    @property
     def top(self) -> T:
-        return self[-1]
+        return None if len(self) == 0 else self[-1]
 
 
 class StackableObject:
-    stack: Stack[Self]
+    stack: Stack[Self] | None
 
-    def __init__(self, stack: Stack[Self]):
+    def __init__(self, stack: Stack[Self] | None):
+        self.set_stack(stack)
+
+    def set_stack(self, stack: Stack[Self] | None):
         self.stack = stack
 
-    def to(self, data: tuple[Any, ...] = ()) -> StackableObjectRef:
+    def to(self, data: tuple[Any, ...] = ()) -> "StackableObjectRef[Self]":
         return StackableObjectRef(self, self.stack, data)
 
     def handle(self, obj: Self, data: tuple[Any, ...]):
@@ -45,12 +44,12 @@ class StackableObjectRef[T:StackableObject]:
 
     def __enter__(self) -> T:
         self.stack.append(self.obj)
-        return self.stack.top()
+        return self.stack.top
 
     def __exit__(self, exc_type, exc_val, exc_tb):
         obj = self.stack.pop()
         assert self.obj is obj, "popped object must be equal to pushed object"
-        obj.handle(self.stack.top(), self.data)
+        obj.handle(self.stack.top, self.data)
 
 
 @dataclass

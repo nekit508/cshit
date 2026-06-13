@@ -168,7 +168,7 @@ class Parser(IParser):
 
     @property
     def view(self) -> TokensView:
-        return self.views.top()
+        return self.views.top
 
     def handle_depth(self, token: IToken, depth: int, reverse: bool = False) -> tuple[int, int]:
         """

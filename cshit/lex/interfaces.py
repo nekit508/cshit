@@ -44,7 +44,6 @@ class TokenType(enum.Enum):
     OR = "||"
 
     ARROW_RIGHT = "->"
-    VOID_POINTER = "(*)"
 
     FN = "fn"
     STRUCT = "struct"
@@ -67,7 +66,15 @@ class TokenType(enum.Enum):
     EOF = "EOF"
     ERROR = "ERROR"
 
-    actual_type_notations = [CHAR, NUMBER, STRING, IDENT, EOF, ERROR, INDENT]
+    actual_type_notations = [
+        CHAR,
+        NUMBER,
+        STRING,
+        IDENT,
+        EOF,
+        ERROR,
+        INDENT
+    ]
 
     @classmethod
     def scan_values(cls) -> list[Self]:

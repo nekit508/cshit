@@ -12,7 +12,6 @@ from ..ast import FunctionDefinition, ASTKind, FunctionDeclaration, CodeBlock, E
     GetExpression
 from ..builtin_types import builtin_types
 from ..lex.interfaces import TokenType
-from ..recursive_dict import RecursiveDict
 from ..stack import StackableObject, Stack
 from ..types import PtrType, Type
 
@@ -49,10 +48,6 @@ class RandomNameProvider(NameProvider):
 
 
 class Context(StackableObject):
-    variables: RecursiveDict[NamedValue]
-    functions: RecursiveDict[NamedValue]
-    parent: Self | None
-
     def __init__(self, stack: Stack[Self], parent: Self | None = None):
         super().__init__(stack)
         self.functions = RecursiveDict(parent and parent.functions)
